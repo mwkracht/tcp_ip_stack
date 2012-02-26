@@ -16,8 +16,11 @@
 #include <netdb.h>
 #include <errno.h>
 #include <pthread.h>
+#include <semaphore.h>
+#include "OrderedList.h"
 
 #define MTU 500
+#define MAX_RECV_BUFF 10240
 
 class FTP;
 
@@ -38,8 +41,13 @@ class TCP{
 		int sock;
 		struct addrinfo *ClientAddr;
 		struct addrinfo *ServerAddr;
-		int SendBase;
+		int Base;
 		int WindowSize;
+		char RecvBuffer[MAX_RECV_BUFF];
+		unsigned int clientSeq; //seq num rand gen by client expected by server
+		unsigned int serverSeq;	//seq num rand gen by server expected by client
+		sem_t data_sem;
+		OrderedList DataList;
 	private:
 		pthread_t recv;
 };
@@ -54,6 +62,6 @@ struct TCP_hdr {
 	unsigned short checksum;
 	unsigned short urgent;
 	unsigned char *options;
-}
+};
 
 #endif

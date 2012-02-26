@@ -18,7 +18,7 @@ short checksum(char *data, int datalen) {
 		}
 	}
 	
-	short temp = 0;
+	unsigned short temp = 0;
 	if (rem) {
 		temp = (short)(data[datalen-1]<<8);
 		if (temp < 0) {
@@ -41,20 +41,68 @@ void *RecvClient(void *local){
 
 void *RecvServer(void *local){
 	TCP *myTCP = (TCP *)local;
-	char *buffer = new char[MTU];
+	char *buffer;
+	bool newBuf = true;
 	int size;
-	struct TCP_hdr *header; 
+	struct TCP_hdr *header;
+
+	OrderedList PacketList = new OrderedList();
 
 	while (1) {
+		if (newBuf) {
+			buffer = new char[MTU];
+		}
+
 		size = recv(myTCP->sock, (void *)buffer, MTU, 0);
 		if(size == -1){
 			printf("ERROR receiving data over socket: %s\n", strerror(errno));
-			return -1;
+			continue;
 		}
 		header = (struct TCP_hdr *)buffer;
 		short calc = checksum(buffer, size);
 		if(calc != header->checksum){
-			//no ACK
+			//NACK send Base
+		} else {
+			if (myTCP->clientSeq == header->SeqNum) {
+				//process flags
+				//save to data list
+				if (sem_wait(&data_sem)) {
+				    perror("sem_wait prod");
+				    exit(-1); //watch/change?
+				}
+				if (WindowSize > 0) {
+					unsigned int offset = header->flags>>12;
+					
+					char *data = (char *)header + offset;
+					int dataLen = size-offset;
+
+					myTCP->DataList.insert(header->SeqNum, data, dataLen);
+					WindowSize -= dataLen;
+					
+					myTCP->clientSeq++;
+											
+					while () {
+					}
+				}
+
+				sem_post(&data_sem);
+				newBuf = false;
+			} else if (myTCP->clientSeq < header->SeqNum) {
+				if (sem_wait(&data_sem)) {
+				    perror("sem_wait prod");
+				    exit(-1); //watch/change?
+				}
+				if (WindowSize > 0) {
+					int ret = PacketList.insert(header->SeqNum, buffer, size);
+					if (ret) {
+
+					}					
+					newBuf = (ret==0);
+				} else {
+					newBuf = false;
+				}
+				sem_post(&data_sem);				
+			}
 		}
 
 
@@ -63,7 +111,6 @@ void *RecvServer(void *local){
 
 
 TCP::TCP(){
-
 }
 
 TCP::~TCP(){
@@ -129,6 +176,10 @@ int TCP::connectTCP(char *addr, char *port){
 	freeaddrinfo(AddrInfo);
 
 	//TODO: add in 3 way handshake & block until done
+	
+	clientSeq = 0;	//rand gen
+	serverSeq = 0;	//sent to us
+	WindowSize = MAX_RECV_BUFF; //sent to us
 
 	if(pthread_create(&recv, NULL, RecvClient, (void *)this)){
 		printf("ERROR: unable to create producer thread.\n");
@@ -195,6 +246,13 @@ int TCP::listenTCP(char *port){
 	freeaddrinfo(AddrInfo);
 
 	//TODO: add in 3 way handshake & block until done
+
+	serverSeq = 0;	//rand gen
+	clientSeq = 0;	//sent to us
+	WindowSize = MAX_RECV_BUFF;
+
+	DataList = new OrderedList();
+	sem_init(&data_sem, 0, 1);
 
 	if(pthread_create(&recv, NULL, RecvServer, (void *)this)){
 		printf("ERROR: unable to create producer thread.\n");
