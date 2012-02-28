@@ -6,7 +6,8 @@
 
 struct Node {
 	int size;
-	unsigned int SeqNum;
+	unsigned int seqNum;
+	unsigned int seqEnd;
 	char *data;
 	Node *next;
 };
@@ -15,12 +16,14 @@ class OrderedList {
 	public: 
 		OrderedList();
 		~OrderedList();
-		int insert(int seqnum, char *buf, int len);
-		unsigned int OrderedList::peekHead(){
+		int insert(unsigned int seqnum, unsigned int seqend, char *buf, int len);
+		unsigned int peekHead();
 		Node* removeHead();
+		int getSize();
 	private:
 		Node *head;
 		Node *end;
+		int size;
 };
 
 #endif

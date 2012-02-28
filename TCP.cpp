@@ -45,8 +45,15 @@ void *RecvServer(void *local){
 	bool newBuf = true;
 	int size;
 	struct TCP_hdr *header;
+	struct TCP_hdr *ackHdr;
+	unsigned int offset;
+	char *data;
+	int dataLen;
+	Node *head;
+	char ackBuf[MTU];
 
-	OrderedList PacketList = new OrderedList();
+
+	OrderedList *packetList = new OrderedList();
 
 	while (1) {
 		if (newBuf) {
@@ -59,53 +66,81 @@ void *RecvServer(void *local){
 			continue;
 		}
 		header = (struct TCP_hdr *)buffer;
+		offset = 4*(header->flags>>12);	
+		data = (char *)header + offset;
+		dataLen = size-offset;
+
 		short calc = checksum(buffer, size);
 		if(calc != header->checksum){
-			//NACK send Base
+			newBuf = false;
+			//NACK send base
 		} else {
-			if (myTCP->clientSeq == header->SeqNum) {
+			if (sem_wait(&myTCP->data_sem)) {
+			    perror("sem_wait prod");
+			    exit(-1); //watch/change?
+			}	
+			if (myTCP->clientSeq == header->seqNum) {
 				//process flags
-				//save to data list
-				if (sem_wait(&data_sem)) {
-				    perror("sem_wait prod");
-				    exit(-1); //watch/change?
-				}
-				if (WindowSize > 0) {
-					unsigned int offset = header->flags>>12;
-					
-					char *data = (char *)header + offset;
-					int dataLen = size-offset;
+	
+				myTCP->dataList->insert(header->seqNum, header->seqNum+dataLen, data, dataLen);//check for insertion
+				myTCP->windowSize -= dataLen;
+				myTCP->clientSeq += dataLen;
+				
+				while (packetList->getSize() != 0 && myTCP->windowSize > 0) {
+					unsigned int PseqNum = packetList->peekHead();
+					if(PseqNum < myTCP->clientSeq ) {
+						head = packetList->removeHead();
+						delete head->data;
+						delete head;
+					} else if(PseqNum == myTCP->clientSeq) {
+						head = packetList->removeHead();
+						header = (struct TCP_hdr *)head->data;
 
-					myTCP->DataList.insert(header->SeqNum, data, dataLen);
-					WindowSize -= dataLen;
-					
-					myTCP->clientSeq++;
-											
-					while () {
+						//Process Flags
+
+						offset = 4*(header->flags>>12);
+						data = (char *)header + offset;
+						dataLen = size-offset;
+
+						myTCP->dataList->insert(header->seqNum, header->seqNum+dataLen, data, dataLen);//check for insertion
+						myTCP->clientSeq += dataLen;
+					} else {
+						break;
 					}
 				}
-
-				sem_post(&data_sem);
-				newBuf = false;
-			} else if (myTCP->clientSeq < header->SeqNum) {
-				if (sem_wait(&data_sem)) {
-				    perror("sem_wait prod");
-				    exit(-1); //watch/change?
-				}
-				if (WindowSize > 0) {
-					int ret = PacketList.insert(header->SeqNum, buffer, size);
+				newBuf = true;
+			} else {
+				//TODO: handle circular seq num
+				if (myTCP->clientSeq < header->seqNum && header->seqNum + dataLen <= myTCP->clientSeq + MAX_RECV_BUFF) {
+					int ret = packetList->insert(header->seqNum, buffer, size);//Issue with insertion
 					if (ret) {
-
-					}					
-					newBuf = (ret==0);
-				} else {
-					newBuf = false;
+						//is dubplicate / colliding
+						newBuf = false;
+					} else {
+						myTCP->windowSize -= dataLen;
+						newBuf = true;
+					}
 				}
-				sem_post(&data_sem);				
 			}
+
+			//ACK
+			header = (struct TCP_hdr *)buffer;
+			
+			ackHdr = (struct TCP_hdr *)ackBuf;
+			ackHdr->srcPort = header->dstPort;
+			ackHdr->dstPort = header->srcPort;
+			ackHdr->seqNum = myTCP->serverSeq;
+			ackHdr->ack = myTCP->clientSeq;
+			ackHdr->flags |= (5)<<12; //check this?
+			ackHdr->window = myTCP->windowSize;
+			ackHdr->urgent = 0;
+			//unsigned char *options;
+			//data? if we have 2way msging
+
+			//ackHdr->checksum = checksum(ackBuf, msgLen);
+			
+			sem_post(&myTCP->data_sem);
 		}
-
-
 	}		
 }
 
@@ -114,8 +149,8 @@ TCP::TCP(){
 }
 
 TCP::~TCP(){
-	free(ClientAddr);
-	free(ServerAddr);
+	free(clientAddr);
+	free(serverAddr);
 }
 
 int TCP::connectTCP(char *addr, char *port){
@@ -156,7 +191,7 @@ int TCP::connectTCP(char *addr, char *port){
 		} else {
 			printf( "Error creating socket: %s\n", strerror( errno ) );
 		}
-		memcpy(ServerAddr, v6AddrInfo, sizeof(addrinfo));
+		memcpy(serverAddr, v6AddrInfo, sizeof(addrinfo));
 	} else if(v4AddrInfo != NULL){
 		sock = socket(v4AddrInfo->ai_family, v4AddrInfo->ai_socktype, v4AddrInfo->ai_protocol);
 		if(sock != -1){
@@ -169,7 +204,7 @@ int TCP::connectTCP(char *addr, char *port){
 		} else {
 			printf( "Error creating socket: %s\n", strerror( errno ) );
 		}
-		memcpy(ServerAddr, v4AddrInfo, sizeof(addrinfo));
+		memcpy(serverAddr, v4AddrInfo, sizeof(addrinfo));
 	} else {
 		printf("ERROR: Unable to find any local IP Address\n");
 	}	
@@ -179,7 +214,7 @@ int TCP::connectTCP(char *addr, char *port){
 	
 	clientSeq = 0;	//rand gen
 	serverSeq = 0;	//sent to us
-	WindowSize = MAX_RECV_BUFF; //sent to us
+	windowSize = MAX_RECV_BUFF; //sent to us
 
 	if(pthread_create(&recv, NULL, RecvClient, (void *)this)){
 		printf("ERROR: unable to create producer thread.\n");
@@ -226,7 +261,7 @@ int TCP::listenTCP(char *port){
 		} else {
 			printf( "Error creating socket: %s\n", strerror( errno ) );
 		}
-		memcpy(ServerAddr, v6AddrInfo, sizeof(addrinfo));
+		memcpy(serverAddr, v6AddrInfo, sizeof(addrinfo));
 	} else if(v4AddrInfo != NULL){
 		sock = socket(v4AddrInfo->ai_family, v4AddrInfo->ai_socktype, v4AddrInfo->ai_protocol);
 		if(sock != -1){
@@ -239,7 +274,7 @@ int TCP::listenTCP(char *port){
 		} else {
 			printf( "Error creating socket: %s\n", strerror( errno ) );
 		}
-		memcpy(ServerAddr, v4AddrInfo, sizeof(addrinfo));
+		memcpy(serverAddr, v4AddrInfo, sizeof(addrinfo));
 	} else {
 		printf("ERROR: Unable to find any local IP Address\n");
 	}	
@@ -249,9 +284,9 @@ int TCP::listenTCP(char *port){
 
 	serverSeq = 0;	//rand gen
 	clientSeq = 0;	//sent to us
-	WindowSize = MAX_RECV_BUFF;
+	windowSize = MAX_RECV_BUFF;
 
-	DataList = new OrderedList();
+	dataList = new OrderedList();
 	sem_init(&data_sem, 0, 1);
 
 	if(pthread_create(&recv, NULL, RecvServer, (void *)this)){

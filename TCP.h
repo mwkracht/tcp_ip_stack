@@ -39,24 +39,24 @@ class TCP{
 		//int closeTCP();
 		//bool isEstablished();
 		int sock;
-		struct addrinfo *ClientAddr;
-		struct addrinfo *ServerAddr;
-		int Base;
-		int WindowSize;
-		char RecvBuffer[MAX_RECV_BUFF];
+		struct addrinfo *clientAddr;
+		struct addrinfo *serverAddr;
+		int base;
+		int windowSize;
+		char recvBuffer[MAX_RECV_BUFF];
 		unsigned int clientSeq; //seq num rand gen by client expected by server
 		unsigned int serverSeq;	//seq num rand gen by server expected by client
 		sem_t data_sem;
-		OrderedList DataList;
+		OrderedList *dataList;
 	private:
 		pthread_t recv;
 };
 
 struct TCP_hdr {
-	unsigned short SrcPort;
-	unsigned short DstPort;
-	unsigned int SeqNum;
-	unsigned int Ack;
+	unsigned short srcPort;
+	unsigned short dstPort;
+	unsigned int seqNum;
+	unsigned int ack;
 	unsigned short flags;
 	unsigned short window;
 	unsigned short checksum;
