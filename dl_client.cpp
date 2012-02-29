@@ -32,8 +32,8 @@ int main(int argc, char *argv[])
 	delete file_trans;*/
 	TCP *tcp = new TCP();
 	tcp->connectTCP(argv[1],argv[2]);
-	char *mybuf = new char[10000];
-	tcp->write(mybuf,10000);
+	char *mybuf = new char[20000];
+	tcp->write(mybuf,20000);
 	delete mybuf; 
 	delete tcp;
 	

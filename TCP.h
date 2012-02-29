@@ -48,6 +48,7 @@ class TCP{
 		//int transmit(char *buffer, unsigned int buf_size);
 		//int receive(char *buffer, unsigned int buf_size);
 		//int closeTCP();
+		void setTimeoutTimer(timer_t timer, int millis);
 		int sock;
 		struct addrinfo *clientAddr;
 		struct addrinfo *serverAddr;
@@ -60,10 +61,11 @@ class TCP{
 		unsigned int sendBase;
 		sem_t data_sem;
 		sem_t packet_sem;
-		//sem_t state_sem;
+		sem_t state_sem;
+		int state;
+		int first;
 		OrderedList *dataList;
 		OrderedList *packetList;
-		//int state;
 		timer_t to_timer;
 	private:
 		pthread_t recv;
