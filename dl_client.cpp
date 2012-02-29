@@ -13,7 +13,7 @@ using namespace std;
 
 int main(int argc, char *argv[])
 {
-	char *ADDR,*FILE,*PORT_NUM;
+	/*char *ADDR,*FILE,*PORT_NUM;
 	FTP* file_trans;
 
 	if(argc==4){
@@ -29,5 +29,12 @@ int main(int argc, char *argv[])
 	if(file_trans->sendFile() == -1){
 		cout << "ERROR: Unable to send file to " << ADDR << " port=" << PORT_NUM << endl;
 	}
-	delete file_trans;
+	delete file_trans;*/
+	TCP *tcp = new TCP();
+	tcp->connectTCP(argv[1],argv[2]);
+	char *mybuf = new char[10000];
+	tcp->write(mybuf,10000);
+	delete mybuf; 
+	delete tcp;
+	
 }

@@ -1,5 +1,28 @@
 #include "TCP.h"
 
+int state;
+int first;
+int waitFlag;
+sem_t write_sem;
+sem_t state_sem;
+
+static void to_handler(int sig, siginfo_t *si, void *uc){
+	int ret;
+	cout << "In timer\n";
+	while((ret=sem_wait(&state_sem)) == -1 && errno == EINTR);
+	if(ret==-1 && errno != EINTR){
+		perror("sem_wait prod");
+		exit(-1);
+	}	
+	state = GBN;
+	sem_post(&state_sem);
+	cout << "acquired and posted\n";
+	first = 1;
+	if(waitFlag == 1){
+		sem_post(&write_sem);
+	}
+}
+
 short checksum(char *data, int datalen) {
 	short *buf;
 	int len = datalen / 2;
@@ -51,16 +74,22 @@ void *RecvServer(void *local){
 	int dataLen;
 	Node *head;
 	char ackBuf[MTU];
+	socklen_t peerLen;
+	short calc;
+	struct sockaddr_storage *peerAddr;
+	int ret;
 
 
-	OrderedList *packetList = new OrderedList();
+	myTCP->packetList = new OrderedList();
+	peerAddr = new sockaddr_storage;
+	peerLen = sizeof(struct sockaddr_storage);
 
 	while (1) {
 		if (newBuf) {
 			buffer = new char[MTU];
 		}
 
-		size = recv(myTCP->sock, (void *)buffer, MTU, 0);
+		size = recvfrom(myTCP->sock, (void *)buffer, MTU, 0, (struct sockaddr *)peerAddr, &peerLen);
 		if(size == -1){
 			printf("ERROR receiving data over socket: %s\n", strerror(errno));
 			continue;
@@ -70,30 +99,32 @@ void *RecvServer(void *local){
 		data = (char *)header + offset;
 		dataLen = size-offset;
 
-		short calc = checksum(buffer, size);
+		//check that ports match expected or reject packet
+		calc = checksum(buffer, size);
 		if(calc != header->checksum){
 			newBuf = false;
 			//NACK send base
 		} else {
-			if (sem_wait(&myTCP->data_sem)) {
-			    perror("sem_wait prod");
-			    exit(-1); //watch/change?
+			while((ret=sem_wait(&myTCP->data_sem)) == -1 && errno == EINTR);
+			if(ret==-1 && errno != EINTR){
+				perror("sem_wait prod");
+				exit(-1);
 			}	
 			if (myTCP->clientSeq == header->seqNum) {
 				//process flags
 	
-				myTCP->dataList->insert(header->seqNum, header->seqNum+dataLen, data, dataLen);//check for insertion
-				myTCP->windowSize -= dataLen;
+				myTCP->dataList->insert(header->seqNum, header->seqNum+dataLen-1, data, dataLen);
+				myTCP->window -= dataLen;
 				myTCP->clientSeq += dataLen;
 				
-				while (packetList->getSize() != 0 && myTCP->windowSize > 0) {
-					unsigned int PseqNum = packetList->peekHead();
-					if(PseqNum < myTCP->clientSeq ) {
-						head = packetList->removeHead();
+				while (myTCP->packetList->getSize() != 0 && myTCP->window > 0) {
+					head = myTCP->packetList->peekHead();
+					if(head->seqNum < myTCP->clientSeq ) {
+						myTCP->packetList->removeHead();
 						delete head->data;
 						delete head;
-					} else if(PseqNum == myTCP->clientSeq) {
-						head = packetList->removeHead();
+					} else if(head->seqNum == myTCP->clientSeq) {
+						myTCP->packetList->removeHead();
 						header = (struct TCP_hdr *)head->data;
 
 						//Process Flags
@@ -102,7 +133,7 @@ void *RecvServer(void *local){
 						data = (char *)header + offset;
 						dataLen = size-offset;
 
-						myTCP->dataList->insert(header->seqNum, header->seqNum+dataLen, data, dataLen);//check for insertion
+						myTCP->dataList->insert(header->seqNum, header->seqNum+dataLen-1, data, dataLen);
 						myTCP->clientSeq += dataLen;
 					} else {
 						break;
@@ -112,12 +143,12 @@ void *RecvServer(void *local){
 			} else {
 				//TODO: handle circular seq num
 				if (myTCP->clientSeq < header->seqNum && header->seqNum + dataLen <= myTCP->clientSeq + MAX_RECV_BUFF) {
-					int ret = packetList->insert(header->seqNum, buffer, size);//Issue with insertion
+					int ret = myTCP->packetList->insert(header->seqNum, header->seqNum+dataLen-1, buffer, size);
 					if (ret) {
 						//is dubplicate / colliding
 						newBuf = false;
 					} else {
-						myTCP->windowSize -= dataLen;
+						myTCP->window -= dataLen;
 						newBuf = true;
 					}
 				}
@@ -126,20 +157,26 @@ void *RecvServer(void *local){
 			//ACK
 			header = (struct TCP_hdr *)buffer;
 			
+			unsigned char ackOffset = 5;	
+			int ackLen = 4*(ackOffset)+1;
 			ackHdr = (struct TCP_hdr *)ackBuf;
 			ackHdr->srcPort = header->dstPort;
 			ackHdr->dstPort = header->srcPort;
 			ackHdr->seqNum = myTCP->serverSeq;
 			ackHdr->ack = myTCP->clientSeq;
-			ackHdr->flags |= (5)<<12; //check this?
-			ackHdr->window = myTCP->windowSize;
+			memset(&ackHdr->flags, 0, sizeof(short));
+			ackHdr->flags |= (ackOffset)<<12; //check this?
+			ackHdr->flags |= ACK_FLAG;
+			ackHdr->window = myTCP->window;
 			ackHdr->urgent = 0;
+			
 			//unsigned char *options;
 			//data? if we have 2way msging
 
-			//ackHdr->checksum = checksum(ackBuf, msgLen);
-			
 			sem_post(&myTCP->data_sem);
+
+			ackHdr->checksum = checksum(ackBuf, ackLen);
+			sendto(myTCP->sock, ackBuf, ackLen, 0, (struct sockaddr *)peerAddr, peerLen);
 		}
 	}		
 }
@@ -155,7 +192,11 @@ TCP::~TCP(){
 
 int TCP::connectTCP(char *addr, char *port){
 
+	struct sigevent sev;
+	struct sigaction sa;
 	struct addrinfo HINTS, *AddrInfo, *v4AddrInfo, *v6AddrInfo;
+
+	serverAddr = new addrinfo;
 	memset(&HINTS, 0, sizeof(HINTS));
 	HINTS.ai_family = AF_UNSPEC; //search both IPv4 and IPv6 addrs
 	HINTS.ai_socktype = SOCK_DGRAM; //Use UDP
@@ -178,7 +219,6 @@ int TCP::connectTCP(char *addr, char *port){
 		}
 		AddrInfo = AddrInfo->ai_next;
 	}
-	
 	if(v6AddrInfo != NULL){
 		sock = socket(v6AddrInfo->ai_family, v6AddrInfo->ai_socktype, v6AddrInfo->ai_protocol);
 		if(sock != -1){
@@ -210,21 +250,60 @@ int TCP::connectTCP(char *addr, char *port){
 	}	
 	freeaddrinfo(AddrInfo);
 
+	sa.sa_flags = SA_SIGINFO;
+	sa.sa_sigaction = to_handler;
+	sigemptyset(&sa.sa_mask);
+	if(sigaction(SIGRTMIN, &sa, NULL) == -1){
+		printf("Error creating time out timer. Exiting.\n");
+		exit(-1);
+	}
+
+	sev.sigev_notify = SIGEV_SIGNAL;
+	sev.sigev_signo = SIGRTMIN;
+	sev.sigev_value.sival_ptr = &to_timer;
+	if(timer_create(CLOCK_REALTIME, &sev, &to_timer) == -1){
+		printf("Error creating time out timer. Exiting.\n");
+		exit(-1);
+	} 
+
+	struct itimerspec its;
+	its.it_value.tv_sec = 0;
+	its.it_value.tv_nsec = 1000;
+	its.it_interval.tv_sec = 0;
+	its.it_interval.tv_nsec = 1000;
+
+	if(timer_settime(to_timer, 0, &its, NULL) == -1){
+		printf("Error setting timer.\n");
+		exit(-1);
+	}
+
 	//TODO: add in 3 way handshake & block until done
 	
-	clientSeq = 0;	//rand gen
-	serverSeq = 0;	//sent to us
-	windowSize = MAX_RECV_BUFF; //sent to us
+	clientSeq = 1;	//rand gen
+	serverSeq = 1;	//sent to us
+	recvWindow = MAX_RECV_BUFF;
+	window = recvWindow; //sent to us
+
+	packetList = new OrderedList();
+	sem_init(&packet_sem, 0, 1);		
+	sem_init(&write_sem, 0, 0);
+	sem_init(&state_sem, 0, 1);
+
+	state = CONTINUE;
+	waitFlag = 0;
 
 	if(pthread_create(&recv, NULL, RecvClient, (void *)this)){
 		printf("ERROR: unable to create producer thread.\n");
 		exit(-1);
 	}
+
 	return 0;
 }
 
 int TCP::listenTCP(char *port){
 	struct addrinfo HINTS, *AddrInfo, *v4AddrInfo, *v6AddrInfo;
+
+	serverAddr = new addrinfo;
 	memset(&HINTS, 0, sizeof(HINTS));
 	HINTS.ai_family = AF_UNSPEC; //search both IPv4 and IPv6 addrs
 	HINTS.ai_socktype = SOCK_DGRAM; //Use UDP
@@ -282,9 +361,10 @@ int TCP::listenTCP(char *port){
 
 	//TODO: add in 3 way handshake & block until done
 
-	serverSeq = 0;	//rand gen
-	clientSeq = 0;	//sent to us
-	windowSize = MAX_RECV_BUFF;
+	serverSeq = 1;	//rand gen
+	clientSeq = 1;	//sent to us
+	recvWindow = MAX_RECV_BUFF;
+	window = MAX_RECV_BUFF; //gotten from client sent packets?
 
 	dataList = new OrderedList();
 	sem_init(&data_sem, 0, 1);
@@ -297,3 +377,154 @@ int TCP::listenTCP(char *port){
 	return 0;
 }
 
+int TCP::write(char *buffer, unsigned int bufLen){
+	first = 1;
+	int index = 0;
+	char *packet;
+	TCP_hdr *header;
+	int packetLen;
+	int dataLen;
+	unsigned int resendSeq;
+	Node *node;
+	int ret;
+	cout << "entered\n";
+	while (1) {
+		while((ret=sem_wait(&state_sem)) == -1 && errno == EINTR);
+		if(ret==-1 && errno != EINTR){
+			perror("sem_wait prod");
+			exit(-1);
+		}
+		cout << "comparing state\n";
+		switch (state) {
+			case CONTINUE:
+				cout << "in continue\n";
+				if (index < bufLen && window > 0) {
+					cout << "sending packet\n";
+					packet = new char[MTU];
+					header = (struct TCP_hdr *)packet;
+		
+					header->srcPort = 0; //need to fill in sometime
+					header->dstPort = 0; //need to fill in sometime
+					header->seqNum = clientSeq;
+					header->ack = serverSeq;
+
+
+					memset(&header->flags, 0, sizeof(short));
+
+					unsigned char offset = 5;
+					header->flags |= (offset)<<12; //check this?
+
+					header->window = MAX_RECV_BUFF;
+					header->urgent = 0;
+
+					if (bufLen - index > MTU - TCP_HEADER_SIZE) {
+						dataLen = MTU - TCP_HEADER_SIZE;
+					} else {
+						dataLen = bufLen - index;
+					}
+					if (dataLen > window) { //leave for now, move to outside if for Nagle
+						dataLen = window;
+					}
+					//Window check / congestion window calc to determine dataLen
+					//also where Nagle alg is
+
+					cout << "scary memcpy dataLen=" << dataLen << "\n";
+					printf("hdr=%d opts=%d %buf=%d\n", header, &header->options, &buffer[index]);
+					memcpy(&header->options, &buffer[index], dataLen);  //ok if we have no options, change if we do
+					cout << "also avoided\n";
+					index += dataLen;
+					clientSeq += dataLen;
+					packetLen = TCP_HEADER_SIZE + dataLen;
+
+					header->checksum = checksum(packet, packetLen);
+
+					while((ret=sem_wait(&packet_sem)) == -1 && errno == EINTR);
+					if(ret==-1 && errno != EINTR){
+						perror("sem_wait prod");
+						exit(-1);
+					}
+					cout << "list insertion\n";
+					int ret = packetList->insert(header->seqNum, header->seqNum+dataLen-1, packet, packetLen);
+					if (ret) {
+						//should never occur
+					}
+					cout << "actually inserted..\n";
+					window -= dataLen;
+					send(sock, packet, packetLen, 0);
+					
+					sem_post(&packet_sem);
+
+					if (first) {
+						//start timeout timer
+						first = 0;
+					}
+					cout << "finished packet send\n";
+				} else {
+					waitFlag = 1;
+				}
+			break;
+			case GBN:
+				cout << "WENT TO GO BACK NNNNN!!!!!!\n";
+				exit(0);
+				while((ret=sem_wait(&packet_sem)) == -1 && errno == EINTR);
+				if(ret==-1 && errno != EINTR){
+					perror("sem_wait prod");
+					exit(-1);
+				}
+
+				if (first) {
+					node = packetList->peekHead();
+				} else if(window <= 0){
+					node = NULL;
+					waitFlag = 1;
+				} else {
+					node = packetList->findNext(resendSeq);
+				}
+				
+				if (node != NULL) {
+					resendSeq = node->seqNum;
+					send(sock, node->data, node->size, 0);
+					window -= dataLen;
+					if (first) {
+						//start timeout timer
+						first = 0;
+					}
+				} else {
+					state = CONTINUE;
+					first = 0;
+				}
+				sem_post(&packet_sem);
+			break;
+			case FAST:
+				while((ret=sem_wait(&packet_sem)) == -1 && errno == EINTR);
+				if(ret==-1 && errno != EINTR){
+					perror("sem_wait prod");
+					exit(-1);
+				}
+
+				node = packetList->peekHead();
+				if(node != NULL){
+					send(sock, node->data, node->size, 0);
+				}
+
+				state = CONTINUE;
+
+				sem_post(&packet_sem);
+			break;
+			default:
+				perror("State error, exiting.");
+				exit(1);
+		}
+		sem_post(&state_sem);
+
+		if (waitFlag) {
+			cout << "Waiting...\n";
+			while((ret=sem_wait(&write_sem)) == -1 && errno == EINTR);
+			if(ret==-1 && errno != EINTR){
+				perror("sem_wait prod");
+				exit(-1);
+			}
+			waitFlag = 0;
+		}
+	}
+}

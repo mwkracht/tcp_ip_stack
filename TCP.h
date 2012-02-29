@@ -17,10 +17,22 @@
 #include <errno.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <time.h>
+#include <signal.h>
 #include "OrderedList.h"
 
 #define MTU 500
 #define MAX_RECV_BUFF 10240
+#define TCP_HEADER_SIZE 20
+
+#define ACK_FLAG 0x0010
+#define RST_FLAG 0x0003
+#define SYN_FLAG 0x0002
+#define FIN_FLAG 0x0001
+
+#define CONTINUE 0
+#define GBN 1
+#define FAST 2
 
 class FTP;
 
@@ -29,25 +41,31 @@ using namespace std;
 class TCP{
 	public:
 		TCP();
-		//UTrans(char *IP, char *port_num, FTP* par); //constructor for send port (udp)
-		//UTrans(char *port_num, FTP* par); //constructor for recv port (udp)
 		~TCP();
 		int connectTCP(char *addr, char *port);
 		int listenTCP(char *port); //need to add three way handshake capability
+		int write(char *buffer, unsigned int bufLen);
 		//int transmit(char *buffer, unsigned int buf_size);
 		//int receive(char *buffer, unsigned int buf_size);
 		//int closeTCP();
-		//bool isEstablished();
 		int sock;
 		struct addrinfo *clientAddr;
 		struct addrinfo *serverAddr;
 		int base;
-		int windowSize;
+		int window;
+		int recvWindow;
 		char recvBuffer[MAX_RECV_BUFF];
 		unsigned int clientSeq; //seq num rand gen by client expected by server
 		unsigned int serverSeq;	//seq num rand gen by server expected by client
+		unsigned int sendBase;
 		sem_t data_sem;
+		sem_t packet_sem;
+		//sem_t state_sem;
 		OrderedList *dataList;
+		OrderedList *packetList;
+		//int state;
+		//int first;
+		timer_t to_timer;
 	private:
 		pthread_t recv;
 };
@@ -61,7 +79,7 @@ struct TCP_hdr {
 	unsigned short window;
 	unsigned short checksum;
 	unsigned short urgent;
-	unsigned char *options;
+	unsigned char options;
 };
 
 #endif

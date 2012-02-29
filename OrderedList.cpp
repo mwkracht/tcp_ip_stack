@@ -2,7 +2,7 @@
 
 OrderedList::OrderedList(){
 	head = NULL;
-	end = NULL;
+	tail = NULL;
 	size = 0;
 }
 
@@ -24,7 +24,7 @@ int OrderedList::insert(unsigned int seqnum, unsigned int seqend, char *buf, int
 
 	if(head==NULL){
 		head = newNode;
-		end = newNode;
+		tail = newNode;
 		newNode->next = NULL;
 		size++;
 		return 0;
@@ -35,21 +35,21 @@ int OrderedList::insert(unsigned int seqnum, unsigned int seqend, char *buf, int
 			delete newNode;
 			return -1;
 		}
-		end = head;
+		tail = head;
 		newNode->next = head;
 		head = newNode;
 		size++;
 		return 0;
 	}
 
-	if (end->seqNum < seqnum) {
-		if (seqend < end->seqEnd) {
+	if (tail->seqNum < seqnum) {
+		if (seqend < tail->seqEnd) {
 			delete newNode;
 			return -1;
 		}
-		end->next = newNode;
+		tail->next = newNode;
 		newNode->next = NULL;
-		end = newNode;
+		tail = newNode;
 		size++;
 		return 0;
 	}
@@ -80,28 +80,34 @@ int OrderedList::insert(unsigned int seqnum, unsigned int seqend, char *buf, int
 
 	newNode->next = NULL;
 	comp->next = newNode;
-	end = newNode;
+	tail = newNode;
 	size++;
 	return 0;
 }
 
-unsigned int OrderedList::peekHead(){
-	if (head == NULL) {
-		return 0;	
-	} else {	
-		return head->seqNum;
-	}
+Node* OrderedList::peekHead(){
+	return head;
 }
 
 Node* OrderedList::removeHead(){
 	Node *temp = head;
 
-	if (head == end) {
-		end = NULL;
+	if (head == tail) {
+		tail = NULL;
 	}
 	if (temp != NULL) {
 		size--;
 		head = temp->next;		
+	}
+
+	return temp;
+}
+
+Node* OrderedList::findNext(unsigned int seqnum) {
+	Node *temp = head;
+	
+	while (temp != NULL && temp->seqNum <= seqnum) {
+		temp = temp->next;
 	}
 
 	return temp;

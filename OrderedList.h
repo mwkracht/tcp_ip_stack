@@ -17,12 +17,13 @@ class OrderedList {
 		OrderedList();
 		~OrderedList();
 		int insert(unsigned int seqnum, unsigned int seqend, char *buf, int len);
-		unsigned int peekHead();
+		Node* peekHead();
 		Node* removeHead();
+		Node* findNext(unsigned int seqnum);
 		int getSize();
 	private:
 		Node *head;
-		Node *end;
+		Node *tail;
 		int size;
 };
 
