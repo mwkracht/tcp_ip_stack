@@ -64,7 +64,6 @@ class TCP{
 		OrderedList *dataList;
 		OrderedList *packetList;
 		//int state;
-		//int first;
 		timer_t to_timer;
 	private:
 		pthread_t recv;
