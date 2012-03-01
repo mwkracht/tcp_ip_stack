@@ -38,7 +38,7 @@ int main(int argc, char *argv[]) {
 	int count = 0;
 	int size;
 	while (1) {
-		size = tcp->read(mybuf, 10000, 2000);
+		size = tcp->read(mybuf, 10000, /*2*/000);
 
 		//if (size) {
 			count += size;

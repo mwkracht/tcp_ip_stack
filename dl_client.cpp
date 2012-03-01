@@ -35,6 +35,7 @@ int main(int argc, char *argv[]) {
 		mybuf[i] = i%10;
 	}
 	tcp->write(mybuf, len);
+	while (1);
 	delete mybuf;
 	delete tcp;
 }

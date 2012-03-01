@@ -6,8 +6,8 @@ sem_t wait_sem;
 
 void TCP::setTimeoutTimer(timer_t timer, int millis) {
 	struct itimerspec its;
-	its.it_value.tv_sec = millis/1000;
-	its.it_value.tv_nsec = (millis%1000)*1000000;
+	its.it_value.tv_sec = millis / 1000;
+	its.it_value.tv_nsec = (millis % 1000) * 1000000;
 	its.it_interval.tv_sec = 0;
 	its.it_interval.tv_nsec = 0;
 
@@ -26,7 +26,7 @@ static void to_handler(int sig, siginfo_t *si, void *uc) {
 }
 
 static void read_handler(int sig, siginfo_t *si, void *uc) {
-	//cout << "read acquired and posted\n";
+	cout << "read acquired and posted\n";
 	timeoutFlag = 1;
 	sem_post(&wait_sem);
 }
@@ -115,7 +115,7 @@ void *recvClient(void *local) {
 				myTCP->window = header->window;
 				myTCP->serverSeq = header->seqNum;
 
-				//reset Timer...
+				printf("recvWin=%d Win=%d\n", myTCP->recvWindow, myTCP->window);
 
 				head = myTCP->packetList->peekHead();
 				if (head != NULL) {
@@ -124,6 +124,8 @@ void *recvClient(void *local) {
 						dupSeq++;
 						if (dupSeq == 3) {
 							dupSeq = 0;
+							myTCP->setTimeoutTimer(myTCP->to_timer, 50);
+
 							while ((ret = sem_wait(&myTCP->state_sem)) == -1
 									&& errno == EINTR)
 								;
@@ -137,6 +139,8 @@ void *recvClient(void *local) {
 					} else {
 						if (myTCP->packetList->containsEnd(header->ack - 1)) {
 							dupSeq = 0;
+							myTCP->setTimeoutTimer(myTCP->to_timer, 50);
+
 							while (head != NULL && header->ack > head->seqEnd) {
 								myTCP->packetList->removeHead();
 								head = myTCP->packetList->peekHead();
@@ -148,6 +152,7 @@ void *recvClient(void *local) {
 				}
 
 				if (waitFlag) {
+					printf("posting to wait_sem\n");
 					sem_post(&wait_sem);
 				}
 
@@ -533,7 +538,10 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 		}
 
 		if (timeoutFlag) {
+			printf("timeout before state=%d", state);
 			timeoutFlag = 0;
+			waitFlag = 0; //handle cases where TO after set waitFlag
+			sem_init(&wait_sem, 0, 0);
 
 			switch (state) {
 			case CONTINUE:
@@ -552,6 +560,8 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				exit(-1);
 			}
 		}
+
+		printf("recvWin=%d Win=%d\n", recvWindow, window);
 
 		cout << "comparing state\n";
 		switch (state) {
@@ -612,7 +622,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 
 				if (first) {
 					first = 0;
-					setTimeoutTimer(to_timer, 0);
+					setTimeoutTimer(to_timer, 50);
 				}
 				cout << "finished packet send\n";
 			} else {
@@ -643,7 +653,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				window -= dataLen;
 				if (first) {
 					first = 0;
-					setTimeoutTimer(to_timer, 0);
+					setTimeoutTimer(to_timer, 50);
 				}
 			} else {
 				state = CONTINUE;
@@ -674,6 +684,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 		}
 
 		if (timeoutFlag) {
+			printf("timeout after state=%d", state);
 			timeoutFlag = 0;
 			waitFlag = 0; //handle cases where TO after set waitFlag
 			sem_init(&wait_sem, 0, 0);
@@ -697,6 +708,12 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 		}
 		sem_post(&state_sem);
 
+		if (index >= bufLen && packetList->getSize() == 0) {
+			printf("finished write bufLen=%d, returning\n", bufLen);
+			setTimeoutTimer(to_timer, 0);
+			return 0;
+		}
+
 		if (waitFlag) {
 			cout << "Waiting...\n";
 			while ((ret = sem_wait(&wait_sem)) == -1 && errno == EINTR)
@@ -705,11 +722,10 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				perror("sem_wait prod");
 				exit(-1);
 			}
-			waitFlag = 0;
-		}
+			sem_init(&wait_sem, 0, 0);
 
-		if (index >= bufLen && packetList->getSize() == 0) {
-			return 0;
+			waitFlag = 0;
+			printf("left waiting waitFlag=%d\n", waitFlag);
 		}
 	}
 }
@@ -727,13 +743,17 @@ int TCP::read(char *buffer, unsigned int bufLen, int millis) {
 	setTimeoutTimer(to_timer, millis);
 
 	while (!timeoutFlag && size < bufLen) {
+		printf("Waiting size=%d bufLen=%d\n", size, bufLen);
+
 		while ((ret = sem_wait(&wait_sem)) == -1 && errno == EINTR)
 			;
 		if (ret == -1 && errno != EINTR) {
 			perror("sem_wait prod");
 			exit(-1);
 		}
+		sem_init(&wait_sem, 0, 0);
 
+		printf("Waiting data_sem\n");
 		while ((ret = sem_wait(&data_sem)) == -1 && errno == EINTR)
 			;
 		if (ret == -1 && errno != EINTR) {
@@ -741,17 +761,24 @@ int TCP::read(char *buffer, unsigned int bufLen, int millis) {
 			exit(-1);
 		}
 
-		//finish
-		while (dataList->getSize() > 0 && size < bufLen) {
+		printf("dataList.size=%d", dataList->getSize());
+		Node *node = dataList->peekHead();
+		if (node) {
+			printf(" seqnum=%d", node->seqNum);
+		}
+		node = dataList->peekTail();
+		if (node) {
+			printf(" seqend=%d", node->seqEnd);
+		}
+		printf("\n");
+
+		while (dataList->getSize() && size < bufLen) {
 			head = dataList->peekHead();
 			avail = head->size - head->index;
 			if (avail) {
 				pt = head->data + head->index;
-				if ((size + avail) < bufLen) {
+				if (size + avail < bufLen) {
 					memcpy(index, pt, avail);
-
-					index += avail;
-					size += avail;
 
 					dataList->removeHead();
 					delete head->del;
@@ -763,6 +790,8 @@ int TCP::read(char *buffer, unsigned int bufLen, int millis) {
 					head->index += avail;
 				}
 
+				index += avail;
+				size += avail;
 				window += avail;
 				printf("window=%d\n", window);
 			} else {
@@ -774,7 +803,12 @@ int TCP::read(char *buffer, unsigned int bufLen, int millis) {
 
 		sem_post(&data_sem);
 
+		if (millis == 0) {
+			break;
+		}
 	}
+
+	setTimeoutTimer(to_timer, 0);
 
 	return size;
 }

@@ -45,7 +45,7 @@ class TCP{
 		int connectTCP(char *addr, char *port);
 		int listenTCP(char *port); //need to add three way handshake capability
 		int write(char *buffer, unsigned int bufLen);
-		int read(char *buffer, unsigned int bufLen, int millis);
+		int read(char *buffer, unsigned int bufLen, int millis=0);
 		//int transmit(char *buffer, unsigned int buf_size);
 		//int receive(char *buffer, unsigned int buf_size);
 		//int closeTCP();
