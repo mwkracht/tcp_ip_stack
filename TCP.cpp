@@ -2,12 +2,12 @@
 
 int timeoutFlag;
 int waitFlag;
-sem_t write_sem;
+sem_t wait_sem;
 
 void TCP::setTimeoutTimer(timer_t timer, int millis) {
 	struct itimerspec its;
-	its.it_value.tv_sec = 0;
-	its.it_value.tv_nsec = millis * 1000000;
+	its.it_value.tv_sec = millis/1000;
+	its.it_value.tv_nsec = (millis%1000)*1000000;
 	its.it_interval.tv_sec = 0;
 	its.it_interval.tv_nsec = 0;
 
@@ -18,11 +18,17 @@ void TCP::setTimeoutTimer(timer_t timer, int millis) {
 }
 
 static void to_handler(int sig, siginfo_t *si, void *uc) {
-	cout << "acquired and posted\n";
+	cout << "timeout acquired and posted\n";
 	timeoutFlag = 1;
 	if (waitFlag == 1) {
-		sem_post(&write_sem);
+		sem_post(&wait_sem);
 	}
+}
+
+static void read_handler(int sig, siginfo_t *si, void *uc) {
+	//cout << "read acquired and posted\n";
+	timeoutFlag = 1;
+	sem_post(&wait_sem);
 }
 
 unsigned short checksum(char *data, int datalen) {
@@ -63,13 +69,16 @@ void *recvClient(void *local) {
 	unsigned short offset;
 	unsigned int dataLen;
 	unsigned short calc;
-	int dupSequence = 0;
+	int dupSeq = 0;
 	int ret;
 	char *data;
 	int size;
 	Node *head;
 	socklen_t peerLen;
 	struct sockaddr_storage *peerAddr;
+
+	peerAddr = new sockaddr_storage;
+	peerLen = sizeof(struct sockaddr_storage);
 
 	while (1) {
 
@@ -94,7 +103,8 @@ void *recvClient(void *local) {
 		} else {
 			if (header->flags & ACK_FLAG) {
 
-				while ((ret = sem_wait(&myTCP->packet_sem)) == -1 && errno == EINTR)
+				while ((ret = sem_wait(&myTCP->packet_sem)) == -1 && errno
+						== EINTR)
 					;
 				if (ret == -1 && errno != EINTR) {
 					perror("sem_wait prod");
@@ -108,27 +118,38 @@ void *recvClient(void *local) {
 				//reset Timer...
 
 				head = myTCP->packetList->peekHead();
-				printf("Sendbase: %u\n", head->seqNum);
-				if (header->seqNum == head->seqNum) {
-					dupSequence++;
-					if (dupSequence == 3) {
-						while ((ret = sem_wait(&myTCP->state_sem)) == -1 && errno == EINTR)
-							;
-						if (ret == -1 && errno != EINTR) {
-							perror("sem_wait prod");
-							exit(-1);
+				if (head != NULL) {
+					printf("Sendbase=%u ACK=%u\n", head->seqNum, header->ack);
+					if (header->ack == head->seqNum) {
+						dupSeq++;
+						if (dupSeq == 3) {
+							dupSeq = 0;
+							while ((ret = sem_wait(&myTCP->state_sem)) == -1
+									&& errno == EINTR)
+								;
+							if (ret == -1 && errno != EINTR) {
+								perror("sem_wait prod");
+								exit(-1);
+							}
+							myTCP->state = FAST;
+							sem_post(&myTCP->state_sem);
 						}
-						myTCP->state = FAST;
-						sem_post(&myTCP->state_sem);
+					} else {
+						if (myTCP->packetList->containsEnd(header->ack - 1)) {
+							dupSeq = 0;
+							while (head != NULL && header->ack > head->seqEnd) {
+								myTCP->packetList->removeHead();
+								head = myTCP->packetList->peekHead();
+							}
+						}
 					}
-				} else {
-					while (header->seqNum > head->seqEnd) {
-						myTCP->packetList->removeHead();
-						head = myTCP->packetList->peekHead();
-					}
+					printf("Through processing ack\n");
+					sem_post(&myTCP->packet_sem);
 				}
 
-				sem_post(&myTCP->packet_sem);
+				if (waitFlag) {
+					sem_post(&wait_sem);
+				}
 
 			} else {
 				printf("Error: Client received packet without ACK set.");
@@ -197,7 +218,7 @@ void *recvServer(void *local) {
 				//process flags
 
 				myTCP->dataList->insert(header->seqNum, header->seqNum
-						+ dataLen - 1, data, dataLen);
+						+ dataLen - 1, data, dataLen, buffer);
 				myTCP->window -= dataLen;
 				myTCP->clientSeq += dataLen;
 
@@ -219,12 +240,14 @@ void *recvServer(void *local) {
 						dataLen = size - offset;
 
 						myTCP->dataList->insert(header->seqNum, header->seqNum
-								+ dataLen - 1, data, dataLen);
+								+ dataLen - 1, data, dataLen, head->del);
 						myTCP->clientSeq += dataLen;
 					} else {
 						break;
 					}
 				}
+
+				sem_post(&wait_sem); //signal recv main thread
 				newBuf = true;
 			} else {
 
@@ -274,6 +297,7 @@ void *recvServer(void *local) {
 			ackHdr->checksum = checksum(ackBuf, ackLen);
 			sendto(myTCP->sock, ackBuf, ackLen, 0,
 					(struct sockaddr *) peerAddr, peerLen);
+			myTCP->serverSeq++;
 		}
 	}
 }
@@ -374,7 +398,7 @@ int TCP::connectTCP(char *addr, char *port) {
 
 	packetList = new OrderedList();
 	sem_init(&packet_sem, 0, 1);
-	sem_init(&write_sem, 0, 0);
+	sem_init(&wait_sem, 0, 0);
 	sem_init(&state_sem, 0, 1);
 
 	state = CONTINUE;
@@ -390,6 +414,9 @@ int TCP::connectTCP(char *addr, char *port) {
 }
 
 int TCP::listenTCP(char *port) {
+
+	struct sigevent sev;
+	struct sigaction sa;
 	struct addrinfo HINTS, *AddrInfo, *v4AddrInfo, *v6AddrInfo;
 
 	serverAddr = new addrinfo;
@@ -450,6 +477,23 @@ int TCP::listenTCP(char *port) {
 	}
 	freeaddrinfo(AddrInfo);
 
+	sa.sa_flags = SA_SIGINFO;
+	sa.sa_sigaction = read_handler;
+	sigemptyset(&sa.sa_mask);
+	if (sigaction(SIGRTMIN, &sa, NULL) == -1) {
+		printf("Error creating time out timer. Exiting.\n");
+		exit(-1);
+	}
+
+	sev.sigev_notify = SIGEV_SIGNAL;
+	sev.sigev_signo = SIGRTMIN;
+	sev.sigev_value.sival_ptr = &to_timer;
+	if (timer_create(CLOCK_REALTIME, &sev, &to_timer) == -1) {
+		printf("Error creating time out timer. Exiting.\n");
+		exit(-1);
+	}
+	setTimeoutTimer(to_timer, 0);
+
 	//TODO: add in 3 way handshake & block until done
 
 	serverSeq = 1; //rand gen
@@ -459,6 +503,7 @@ int TCP::listenTCP(char *port) {
 
 	dataList = new OrderedList();
 	sem_init(&data_sem, 0, 1);
+	sem_init(&wait_sem, 0, 0);
 
 	if (pthread_create(&recv, NULL, recvServer, (void *) this)) {
 		printf("ERROR: unable to create producer thread.\n");
@@ -554,7 +599,6 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 					perror("sem_wait prod");
 					exit(-1);
 				}
-				cout << "list insertion\n";
 				int ret = packetList->insert(header->seqNum, header->seqNum
 						+ dataLen - 1, packet, packetLen);
 				if (ret) {
@@ -632,7 +676,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 		if (timeoutFlag) {
 			timeoutFlag = 0;
 			waitFlag = 0; //handle cases where TO after set waitFlag
-			sem_init(&write_sem, 0, 0);
+			sem_init(&wait_sem, 0, 0);
 
 			switch (state) {
 			case CONTINUE:
@@ -655,7 +699,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 
 		if (waitFlag) {
 			cout << "Waiting...\n";
-			while ((ret = sem_wait(&write_sem)) == -1 && errno == EINTR)
+			while ((ret = sem_wait(&wait_sem)) == -1 && errno == EINTR)
 				;
 			if (ret == -1 && errno != EINTR) {
 				perror("sem_wait prod");
@@ -663,5 +707,74 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 			}
 			waitFlag = 0;
 		}
+
+		if (index >= bufLen && packetList->getSize() == 0) {
+			return 0;
+		}
 	}
+}
+
+int TCP::read(char *buffer, unsigned int bufLen, int millis) {
+	int size = 0;
+	char *index = buffer;
+	char *pt;
+	int ret = 0;
+	Node *head = NULL;
+	Node *tail;
+	int avail = 0;
+	timeoutFlag = 0;
+
+	setTimeoutTimer(to_timer, millis);
+
+	while (!timeoutFlag && size < bufLen) {
+		while ((ret = sem_wait(&wait_sem)) == -1 && errno == EINTR)
+			;
+		if (ret == -1 && errno != EINTR) {
+			perror("sem_wait prod");
+			exit(-1);
+		}
+
+		while ((ret = sem_wait(&data_sem)) == -1 && errno == EINTR)
+			;
+		if (ret == -1 && errno != EINTR) {
+			perror("sem_wait prod");
+			exit(-1);
+		}
+
+		//finish
+		while (dataList->getSize() > 0 && size < bufLen) {
+			head = dataList->peekHead();
+			avail = head->size - head->index;
+			if (avail) {
+				pt = head->data + head->index;
+				if ((size + avail) < bufLen) {
+					memcpy(index, pt, avail);
+
+					index += avail;
+					size += avail;
+
+					dataList->removeHead();
+					delete head->del;
+					delete head;
+				} else {
+					avail = bufLen - size;
+					memcpy(index, pt, avail);
+
+					head->index += avail;
+				}
+
+				window += avail;
+				printf("window=%d\n", window);
+			} else {
+				dataList->removeHead();
+				delete head->del;
+				delete head;
+			}
+		}
+
+		sem_post(&data_sem);
+
+	}
+
+	return size;
 }

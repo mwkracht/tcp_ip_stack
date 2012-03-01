@@ -8,7 +8,9 @@ struct Node {
 	int size;
 	unsigned int seqNum;
 	unsigned int seqEnd;
+	char *del;
 	char *data;
+	int index;
 	Node *next;
 };
 
@@ -16,10 +18,12 @@ class OrderedList {
 	public: 
 		OrderedList();
 		~OrderedList();
-		int insert(unsigned int seqnum, unsigned int seqend, char *buf, int len);
+		int insert(unsigned int seqnum, unsigned int seqend, char *buf, int len, char *del=NULL);
 		Node* peekHead();
+		Node* peekTail();
 		Node* removeHead();
 		Node* findNext(unsigned int seqnum);
+		int containsEnd(unsigned int seqend);
 		int getSize();
 	private:
 		Node *head;

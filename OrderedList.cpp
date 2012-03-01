@@ -9,18 +9,25 @@ OrderedList::OrderedList(){
 OrderedList::~OrderedList(){
 	Node *temp = removeHead();
 	while(temp!=NULL){
-		delete temp->data;
+		delete temp->del;
 		delete temp;
 		temp = removeHead();
 	}
 }
 
-int OrderedList::insert(unsigned int seqnum, unsigned int seqend, char *buf, int len){
+int OrderedList::insert(unsigned int seqnum, unsigned int seqend, char *buf, int len, char *del){
 	Node *newNode = new Node;
 	newNode->seqNum = seqnum;
 	newNode->seqEnd = seqend;
 	newNode->size = len;
 	newNode->data = buf;
+	newNode->index = 0;
+
+	if (del != NULL) {
+		newNode->del = del;
+	} else {
+		newNode->del = buf;
+	}
 
 	if(head==NULL){
 		head = newNode;
@@ -89,6 +96,10 @@ Node* OrderedList::peekHead(){
 	return head;
 }
 
+Node* OrderedList::peekTail(){
+	return tail;
+}
+
 Node* OrderedList::removeHead(){
 	Node *temp = head;
 
@@ -111,6 +122,16 @@ Node* OrderedList::findNext(unsigned int seqnum) {
 	}
 
 	return temp;
+}
+
+int OrderedList::containsEnd(unsigned int seqend) {
+	Node *temp = head;
+
+	while (temp != NULL && temp->seqEnd < seqend) {
+		temp = temp->next;
+	}
+
+	return temp != NULL && temp->seqEnd == seqend;
 }
 
 int OrderedList::getSize() {
