@@ -444,10 +444,10 @@ int TCP::connectTCP(char *addr, char *port) {
 	sem_init(&packet_sem, 0, 1);
 	sem_init(&wait_sem, 0, 0);
 
-	waitFlag = 0;
-	timeoutFlag = 0;
-	fastFlag = 0;
 	gbnFlag = 0;
+	fastFlag = 0;
+	timeoutFlag = 0;
+	waitFlag = 0;
 
 	if (pthread_create(&recv, NULL, recvClient, (void *) this)) {
 		printf("ERROR: unable to create producer thread.\n");
@@ -569,6 +569,8 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 	Node *node;
 	int cong;
 	int ret;
+	unsigned char offset;
+
 	cout << "entered\n";
 	while (1) {
 		printf("Win=%d recvWin=%d congWin=%d\n", window, recvWindow, congWindow);
@@ -631,10 +633,16 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 
 			if (node != NULL) {
 				resendSeq = node->seqNum;
+
 				send(sock, node->data, node->size, 0);
 				printf("sending seqnum=%d seqend=%d\n", node->seqNum,
 						node->seqEnd);
-				//window -= dataLen; fix??
+
+				header = (struct TCP_hdr *) node->data;
+				offset = 4 * (header->flags >> 12);
+				dataLen = node->size - offset;
+				window -= dataLen;
+
 				if (firstFlag) {
 					firstFlag = 0;
 					setTimeoutTimer(to_timer, 50);
@@ -659,7 +667,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 
 				memset(&header->flags, 0, sizeof(short));
 
-				unsigned char offset = 5;
+				offset = 5;
 				header->flags |= (offset) << 12; //check this?
 
 				header->window = MAX_RECV_BUFF;
