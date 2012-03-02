@@ -728,7 +728,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 			return 0;
 		}
 
-		if (waitFlag && !timeoutFlag) {
+		if (waitFlag && !timeoutFlag && !fastFlag) {
 			cout << "Waiting...\n";
 			while ((ret = sem_wait(&wait_sem)) == -1 && errno == EINTR)
 				;
