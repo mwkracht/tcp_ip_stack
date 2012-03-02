@@ -1,7 +1,10 @@
 #include "TCP.h"
 
-int timeoutFlag;
-int waitFlag;
+unsigned int firstFlag;
+unsigned int gbnFlag;
+unsigned int fastFlag;
+unsigned int timeoutFlag;
+unsigned int waitFlag;
 sem_t wait_sem;
 
 void TCP::setTimeoutTimer(timer_t timer, int millis) {
@@ -21,7 +24,7 @@ static void to_handler(int sig, siginfo_t *si, void *uc) {
 	cout << "timeout acquired and posted\n";
 	timeoutFlag = 1;
 	if (waitFlag == 1) {
-		cout << "posting to wait_sem";
+		cout << "posting to wait_sem\n";
 		sem_post(&wait_sem);
 	}
 }
@@ -125,6 +128,7 @@ void *recvClient(void *local) {
 						dupSeq++;
 						if (dupSeq == 3) {
 							dupSeq = 0;
+
 							myTCP->setTimeoutTimer(myTCP->to_timer, 50);
 							switch (myTCP->congState) {
 							case SLOWSTART:
@@ -142,18 +146,7 @@ void *recvClient(void *local) {
 							}
 							printf("congState=%d congWindow=%d\n",
 									myTCP->congState, myTCP->congWindow);
-
-							//waiting on state_sem inside holding packet_sem causes locks!
-							//TODO: fix this!!!!
-							while ((ret = sem_wait(&myTCP->state_sem)) == -1
-									&& errno == EINTR)
-								;
-							if (ret == -1 && errno != EINTR) {
-								perror("sem_wait prod");
-								exit(-1);
-							}
-							myTCP->state = FAST;
-							sem_post(&myTCP->state_sem);
+							fastFlag = 1;
 						}
 					} else {
 						if (myTCP->packetList->containsEnd(header->ack - 1)) {
@@ -326,7 +319,8 @@ void *recvServer(void *local) {
 			ackHdr->srcPort = header->dstPort;
 			ackHdr->dstPort = header->srcPort;
 			ackHdr->seqNum = myTCP->serverSeq;
-			ackHdr->ack = myTCP->clientSeq;
+			//ackHdr->ack = myTCP->clientSeq;
+			ackHdr->ack = 1;
 			memset(&ackHdr->flags, 0, sizeof(short));
 			ackHdr->flags |= (ackOffset) << 12; //check this?
 			ackHdr->flags |= ACK_FLAG;
@@ -449,11 +443,11 @@ int TCP::connectTCP(char *addr, char *port) {
 	packetList = new OrderedList();
 	sem_init(&packet_sem, 0, 1);
 	sem_init(&wait_sem, 0, 0);
-	sem_init(&state_sem, 0, 1);
 
-	state = CONTINUE;
 	waitFlag = 0;
 	timeoutFlag = 0;
+	fastFlag = 0;
+	gbnFlag = 0;
 
 	if (pthread_create(&recv, NULL, recvClient, (void *) this)) {
 		printf("ERROR: unable to create producer thread.\n");
@@ -565,7 +559,7 @@ int TCP::listenTCP(char *port) {
 }
 
 int TCP::write(char *buffer, unsigned int bufLen) {
-	first = 1;
+	firstFlag = 1;
 	int index = 0;
 	char *packet;
 	TCP_hdr *header;
@@ -577,15 +571,14 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 	int ret;
 	cout << "entered\n";
 	while (1) {
-		while ((ret = sem_wait(&state_sem)) == -1 && errno == EINTR)
-			;
-		if (ret == -1 && errno != EINTR) {
-			perror("sem_wait prod");
-			exit(-1);
-		}
+		printf("Win=%d recvWin=%d congWin=%d\n", window, recvWindow, congWindow);
+		printf("flags: first=%d gbn=%d, fast=%d, to=%d, wait=%d\n", firstFlag,
+				gbnFlag, fastFlag, timeoutFlag, waitFlag);
 
 		if (timeoutFlag) {
-			printf("timeout before state=%d", state);
+			firstFlag = 1;
+			gbnFlag = 1;
+			fastFlag = 0;
 			timeoutFlag = 0;
 			waitFlag = 0; //handle cases where TO after set waitFlag
 			sem_init(&wait_sem, 0, 0);
@@ -599,31 +592,59 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 			congState = SLOWSTART;
 			congWindow = 1;
 			sem_post(&packet_sem);
-			printf("congState=%d congWindow=%d\n", congState, congWindow);
 
-			switch (state) {
-			case CONTINUE:
-				state = GBN;
-				first = 1;
-				break;
-			case GBN:
-				first = 1;
-				break;
-			case FAST:
-				state = GBN;
-				first = 1;
-				break;
-			default:
-				fprintf(stderr, "unknown state, state=%d", state);
+			printf("congState=%d congWindow=%d\n", congState, congWindow);
+		} else if (fastFlag) {
+			cout << "fast retransmit\n";
+			fastFlag = 0;
+
+			while ((ret = sem_wait(&packet_sem)) == -1 && errno == EINTR)
+				;
+			if (ret == -1 && errno != EINTR) {
+				perror("sem_wait prod");
 				exit(-1);
 			}
-		}
+			node = packetList->peekHead();
+			if (node != NULL) {
+				send(sock, node->data, node->size, 0);
+				printf("sending seqnum=%d seqend=%d\n", node->seqNum,
+						node->seqEnd);
+			}
+			sem_post(&packet_sem);
+		} else if (gbnFlag) {
+			cout << "WENT TO GO BACK NNNNN!!!!!!\n";
+			while ((ret = sem_wait(&packet_sem)) == -1 && errno == EINTR)
+				;
+			if (ret == -1 && errno != EINTR) {
+				perror("sem_wait prod");
+				exit(-1);
+			}
 
-		printf("Win=%d recvWin=%d congWin=%d\n", window, recvWindow, congWindow);
+			if (firstFlag) {
+				node = packetList->peekHead();
+			} else if (window <= 0 || congWindow - recvWindow + window <= 0) { //congestion window
+				node = NULL;
+				waitFlag = 1;
+			} else {
+				node = packetList->findNext(resendSeq);
+			}
 
-		cout << "comparing state\n";
-		switch (state) {
-		case CONTINUE:
+			if (node != NULL) {
+				resendSeq = node->seqNum;
+				send(sock, node->data, node->size, 0);
+				printf("sending seqnum=%d seqend=%d\n", node->seqNum,
+						node->seqEnd);
+				//window -= dataLen; fix??
+				if (firstFlag) {
+					firstFlag = 0;
+					setTimeoutTimer(to_timer, 50);
+				}
+			} else {
+				gbnFlag = 0;
+				firstFlag = 0;
+			}
+			sem_post(&packet_sem);
+		} else {
 			cout << "in continue\n";
 			cong = congWindow - recvWindow + window;
 			if (index < bufLen && window > 0 && cong > 0) {
@@ -680,107 +701,19 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				cout << "actually inserted..\n";
 				window -= dataLen;
 				send(sock, packet, packetLen, 0);
-
+				printf("sending seqnum=%d seqend=%d\n", header->seqNum,
+						header->seqNum + dataLen - 1);
 				sem_post(&packet_sem);
 
-				if (first) {
-					first = 0;
+				if (firstFlag) {
+					firstFlag = 0;
 					setTimeoutTimer(to_timer, 50);
 				}
 				cout << "finished packet send\n";
 			} else {
 				waitFlag = 1;
 			}
-			break;
-		case GBN:
-			cout << "WENT TO GO BACK NNNNN!!!!!!\n";
-			while ((ret = sem_wait(&packet_sem)) == -1 && errno == EINTR)
-				;
-			if (ret == -1 && errno != EINTR) {
-				perror("sem_wait prod");
-				exit(-1);
-			}
-
-			if (first) {
-				node = packetList->peekHead();
-			} else if (window <= 0) {
-				node = NULL;
-				waitFlag = 1;
-			} else {
-				node = packetList->findNext(resendSeq);
-			}
-
-			if (node != NULL) {
-				resendSeq = node->seqNum;
-				send(sock, node->data, node->size, 0);
-				window -= dataLen;
-				if (first) {
-					first = 0;
-					setTimeoutTimer(to_timer, 50);
-				}
-			} else {
-				state = CONTINUE;
-				first = 0;
-			}
-			sem_post(&packet_sem);
-			break;
-		case FAST:
-			while ((ret = sem_wait(&packet_sem)) == -1 && errno == EINTR)
-				;
-			if (ret == -1 && errno != EINTR) {
-				perror("sem_wait prod");
-				exit(-1);
-			}
-
-			node = packetList->peekHead();
-			if (node != NULL) {
-				send(sock, node->data, node->size, 0);
-			}
-
-			state = CONTINUE;
-
-			sem_post(&packet_sem);
-			break;
-		default:
-			perror("State error, exiting.");
-			exit(1);
 		}
-
-		if (timeoutFlag) {
-			printf("timeout after state=%d", state);
-			timeoutFlag = 0;
-			waitFlag = 0; //handle cases where TO after set waitFlag
-			sem_init(&wait_sem, 0, 0);
-
-			while ((ret = sem_wait(&packet_sem)) == -1 && errno == EINTR)
-				;
-			if (ret == -1 && errno != EINTR) {
-				perror("sem_wait prod");
-				exit(-1);
-			}
-			congState = SLOWSTART;
-			congWindow = 1;
-			sem_post(&packet_sem);
-			printf("congState=%d congWindow=%d\n", congState, congWindow);
-
-			switch (state) {
-			case CONTINUE:
-				state = GBN;
-				first = 1;
-				break;
-			case GBN:
-				first = 1;
-				break;
-			case FAST:
-				state = GBN;
-				first = 1;
-				break;
-			default:
-				fprintf(stderr, "unknown state, state=%d", state);
-				exit(-1);
-			}
-		}
-		sem_post(&state_sem);
 
 		if (index >= bufLen && packetList->getSize() == 0) {
 			printf("finished write bufLen=%d, returning\n", bufLen);
@@ -788,7 +721,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 			return 0;
 		}
 
-		if (waitFlag) {
+		if (waitFlag && !timeoutFlag) {
 			cout << "Waiting...\n";
 			while ((ret = sem_wait(&wait_sem)) == -1 && errno == EINTR)
 				;

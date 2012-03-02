@@ -32,7 +32,6 @@
 
 #define CONTINUE 1
 #define GBN 2
-#define FAST 3
 
 #define SLOWSTART 1
 #define AIMD 2
@@ -55,7 +54,6 @@ class TCP{
 		int sock;
 		struct addrinfo *clientAddr;
 		struct addrinfo *serverAddr;
-		int base;
 		unsigned int window;
 		unsigned int recvWindow;
 		unsigned int congWindow;
@@ -68,9 +66,6 @@ class TCP{
 		unsigned int sendBase;
 		sem_t data_sem;
 		sem_t packet_sem;
-		sem_t state_sem;
-		int state;
-		int first;
 		OrderedList *dataList;
 		OrderedList *packetList;
 		timer_t to_timer;
