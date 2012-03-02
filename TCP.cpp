@@ -21,6 +21,7 @@ static void to_handler(int sig, siginfo_t *si, void *uc) {
 	cout << "timeout acquired and posted\n";
 	timeoutFlag = 1;
 	if (waitFlag == 1) {
+		cout << "posting to wait_sem";
 		sem_post(&wait_sem);
 	}
 }
@@ -64,7 +65,7 @@ unsigned short checksum(char *data, int datalen) {
 
 void *recvClient(void *local) {
 	TCP *myTCP = (TCP *) local;
-	char *buffer = new char[MTU];
+	char *buffer = new char[myTCP->MSS];
 	struct TCP_hdr *header;
 	unsigned short offset;
 	unsigned int dataLen;
@@ -82,7 +83,7 @@ void *recvClient(void *local) {
 
 	while (1) {
 
-		size = recvfrom(myTCP->sock, (void *) buffer, MTU, 0,
+		size = recvfrom(myTCP->sock, (void *) buffer, myTCP->MSS, 0,
 				(struct sockaddr *) peerAddr, &peerLen);
 		if (size == -1) {
 			printf("ERROR receiving data over socket: %s\n", strerror(errno));
@@ -125,7 +126,25 @@ void *recvClient(void *local) {
 						if (dupSeq == 3) {
 							dupSeq = 0;
 							myTCP->setTimeoutTimer(myTCP->to_timer, 50);
+							switch (myTCP->congState) {
+							case SLOWSTART:
+								myTCP->congState = FASTREC;
+								break;
+							case AIMD:
+								myTCP->congState = FASTREC;
+								myTCP->congWindow /= 2;
+								break;
+							case FASTREC:
+								break;
+							default:
+								fprintf(stderr, "unknown congState=%d\n",
+										myTCP->congState);
+							}
+							printf("congState=%d congWindow=%d\n",
+									myTCP->congState, myTCP->congWindow);
 
+							//waiting on state_sem inside holding packet_sem causes locks!
+							//TODO: fix this!!!!
 							while ((ret = sem_wait(&myTCP->state_sem)) == -1
 									&& errno == EINTR)
 								;
@@ -139,7 +158,27 @@ void *recvClient(void *local) {
 					} else {
 						if (myTCP->packetList->containsEnd(header->ack - 1)) {
 							dupSeq = 0;
+
 							myTCP->setTimeoutTimer(myTCP->to_timer, 50);
+							switch (myTCP->congState) {
+							case SLOWSTART:
+								myTCP->congWindow *= 2;
+								if (myTCP->congWindow >= myTCP->threshhold) {
+									myTCP->congState = AIMD;
+								}
+								break;
+							case AIMD:
+								myTCP->congWindow += myTCP->MSS;
+								break;
+							case FASTREC:
+								myTCP->congState = AIMD;
+								break;
+							default:
+								fprintf(stderr, "unknown congState=%d\n",
+										myTCP->congState);
+							}
+							printf("congState=%d congWindow=%d\n",
+									myTCP->congState, myTCP->congWindow);
 
 							while (head != NULL && header->ack > head->seqEnd) {
 								myTCP->packetList->removeHead();
@@ -176,7 +215,7 @@ void *recvServer(void *local) {
 	char *data;
 	int dataLen;
 	Node *head;
-	char ackBuf[MTU];
+	char ackBuf[myTCP->MSS];
 	socklen_t peerLen;
 	unsigned short calc;
 	struct sockaddr_storage *peerAddr;
@@ -188,10 +227,10 @@ void *recvServer(void *local) {
 
 	while (1) {
 		if (newBuf) {
-			buffer = new char[MTU];
+			buffer = new char[myTCP->MSS];
 		}
 
-		size = recvfrom(myTCP->sock, (void *) buffer, MTU, 0,
+		size = recvfrom(myTCP->sock, (void *) buffer, myTCP->MSS, 0,
 				(struct sockaddr *) peerAddr, &peerLen);
 		if (size == -1) {
 			printf("ERROR receiving data over socket: %s\n", strerror(errno));
@@ -396,10 +435,16 @@ int TCP::connectTCP(char *addr, char *port) {
 
 	//TODO: add in 3 way handshake & block until done
 
+	MSS = MTU;
 	clientSeq = 1; //rand gen
 	serverSeq = 1; //sent to us
+
 	recvWindow = MAX_RECV_BUFF;
 	window = recvWindow; //sent to us
+	congState = SLOWSTART;
+	congWindow = MSS - TCP_HEADER_SIZE;
+	printf("congState=%d congWindow=%d\n", congState, congWindow);
+	threshhold = MAX_RECV_BUFF / 2;
 
 	packetList = new OrderedList();
 	sem_init(&packet_sem, 0, 1);
@@ -505,6 +550,7 @@ int TCP::listenTCP(char *port) {
 	clientSeq = 1; //sent to us
 	recvWindow = MAX_RECV_BUFF;
 	window = MAX_RECV_BUFF; //gotten from client sent packets?
+	MSS = MTU;
 
 	dataList = new OrderedList();
 	sem_init(&data_sem, 0, 1);
@@ -527,6 +573,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 	int dataLen;
 	unsigned int resendSeq;
 	Node *node;
+	int cong;
 	int ret;
 	cout << "entered\n";
 	while (1) {
@@ -542,6 +589,17 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 			timeoutFlag = 0;
 			waitFlag = 0; //handle cases where TO after set waitFlag
 			sem_init(&wait_sem, 0, 0);
+
+			while ((ret = sem_wait(&packet_sem)) == -1 && errno == EINTR)
+				;
+			if (ret == -1 && errno != EINTR) {
+				perror("sem_wait prod");
+				exit(-1);
+			}
+			congState = SLOWSTART;
+			congWindow = 1;
+			sem_post(&packet_sem);
+			printf("congState=%d congWindow=%d\n", congState, congWindow);
 
 			switch (state) {
 			case CONTINUE:
@@ -561,15 +619,16 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 			}
 		}
 
-		printf("recvWin=%d Win=%d\n", recvWindow, window);
+		printf("Win=%d recvWin=%d congWin=%d\n", window, recvWindow, congWindow);
 
 		cout << "comparing state\n";
 		switch (state) {
 		case CONTINUE:
 			cout << "in continue\n";
-			if (index < bufLen && window > 0) {
+			cong = congWindow - recvWindow + window;
+			if (index < bufLen && window > 0 && cong > 0) {
 				cout << "sending packet\n";
-				packet = new char[MTU];
+				packet = new char[MSS];
 				header = (struct TCP_hdr *) packet;
 
 				header->srcPort = 0; //need to fill in sometime
@@ -585,14 +644,18 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				header->window = MAX_RECV_BUFF;
 				header->urgent = 0;
 
-				if (bufLen - index > MTU - TCP_HEADER_SIZE) {
-					dataLen = MTU - TCP_HEADER_SIZE;
+				if (bufLen - index > MSS - TCP_HEADER_SIZE) {
+					dataLen = MSS - TCP_HEADER_SIZE;
 				} else {
 					dataLen = bufLen - index;
 				}
 				if (dataLen > window) { //leave for now, move to outside if for Nagle
 					dataLen = window;
 				}
+				if (dataLen > cong) {
+					dataLen = cong;
+				}
+
 				//Window check / congestion window calc to determine dataLen
 				//also where Nagle alg is
 
@@ -688,6 +751,17 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 			timeoutFlag = 0;
 			waitFlag = 0; //handle cases where TO after set waitFlag
 			sem_init(&wait_sem, 0, 0);
+
+			while ((ret = sem_wait(&packet_sem)) == -1 && errno == EINTR)
+				;
+			if (ret == -1 && errno != EINTR) {
+				perror("sem_wait prod");
+				exit(-1);
+			}
+			congState = SLOWSTART;
+			congWindow = 1;
+			sem_post(&packet_sem);
+			printf("congState=%d congWindow=%d\n", congState, congWindow);
 
 			switch (state) {
 			case CONTINUE:

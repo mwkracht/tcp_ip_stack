@@ -30,9 +30,13 @@
 #define SYN_FLAG 0x0002
 #define FIN_FLAG 0x0001
 
-#define CONTINUE 0
-#define GBN 1
-#define FAST 2
+#define CONTINUE 1
+#define GBN 2
+#define FAST 3
+
+#define SLOWSTART 1
+#define AIMD 2
+#define FASTREC 3
 
 class FTP;
 
@@ -46,16 +50,18 @@ class TCP{
 		int listenTCP(char *port); //need to add three way handshake capability
 		int write(char *buffer, unsigned int bufLen);
 		int read(char *buffer, unsigned int bufLen, int millis=0);
-		//int transmit(char *buffer, unsigned int buf_size);
-		//int receive(char *buffer, unsigned int buf_size);
 		//int closeTCP();
 		void setTimeoutTimer(timer_t timer, int millis);
 		int sock;
 		struct addrinfo *clientAddr;
 		struct addrinfo *serverAddr;
 		int base;
-		int window;
-		int recvWindow;
+		unsigned int window;
+		unsigned int recvWindow;
+		unsigned int congWindow;
+		unsigned int congState;
+		unsigned int MSS;
+		unsigned int threshhold;
 		char recvBuffer[MAX_RECV_BUFF];
 		unsigned int clientSeq; //seq num rand gen by client expected by server
 		unsigned int serverSeq;	//seq num rand gen by server expected by client
