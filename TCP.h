@@ -50,7 +50,7 @@ class TCP{
 		int write(char *buffer, unsigned int bufLen);
 		int read(char *buffer, unsigned int bufLen, int millis=0);
 		//int closeTCP();
-		void setTimeoutTimer(timer_t timer, int millis);
+		unsigned int setTimeoutTimer(timer_t timer, int millis);
 		int sock;
 		struct addrinfo *clientAddr;
 		struct addrinfo *serverAddr;
