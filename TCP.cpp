@@ -319,8 +319,7 @@ void *recvServer(void *local) {
 			ackHdr->srcPort = header->dstPort;
 			ackHdr->dstPort = header->srcPort;
 			ackHdr->seqNum = myTCP->serverSeq;
-			//ackHdr->ack = myTCP->clientSeq;
-			ackHdr->ack = 1;
+			ackHdr->ack = myTCP->clientSeq;
 			memset(&ackHdr->flags, 0, sizeof(short));
 			ackHdr->flags |= (ackOffset) << 12; //check this?
 			ackHdr->flags |= ACK_FLAG;
