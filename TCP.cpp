@@ -598,7 +598,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				exit(-1);
 			}
 			congState = SLOWSTART;
-			congWindow = 1;
+			congWindow = MSS;
 			sem_post(&packet_sem);
 
 			printf("congState=%d congWindow=%d\n", congState, congWindow);
