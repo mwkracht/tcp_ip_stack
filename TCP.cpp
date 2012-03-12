@@ -7,7 +7,38 @@ unsigned int timeoutFlag;
 unsigned int waitFlag;
 sem_t wait_sem;
 
-unsigned int TCP::setTimeoutTimer(timer_t timer, int millis) {
+double TCP::stopTimer(timer_t timer) {
+	struct itimerspec its;
+	struct itimerspec its_old;
+
+	its.it_value.tv_sec = 0;
+	its.it_value.tv_nsec = 0;
+	its.it_interval.tv_sec = 0;
+	its.it_interval.tv_nsec = 0;
+
+	if (timer_settime(timer, 0, &its, &its_old) == -1) {
+		printf("Error setting timer.\n");
+		exit(-1);
+	}
+
+	return its_old.it_value.tv_sec * 1000.0 + its_old.it_value.tv_nsec
+			/ 1000000.0;
+}
+
+void TCP::startTimer(timer_t timer, double millis) {
+	struct itimerspec its;
+	its.it_value.tv_sec = static_cast<long int> (millis / 1000);
+	its.it_value.tv_nsec = static_cast<long int> ((millis % 1000) * 1000000);
+	its.it_interval.tv_sec = 0;
+	its.it_interval.tv_nsec = 0;
+
+	if (timer_settime(timer, 0, &its, NULL) == -1) {
+		printf("Error setting timer.\n");
+		exit(-1);
+	}
+}
+
+unsigned int TCP::setTimer(timer_t timer, int millis) {
 	struct itimerspec its;
 	its.it_value.tv_sec = millis / 1000;
 	its.it_value.tv_nsec = (millis % 1000) * 1000000;
@@ -81,9 +112,10 @@ void *recvClient(void *local) {
 	char *data;
 	int size;
 	Node *head;
-	unsigned int RTT;
 	socklen_t peerLen;
 	struct sockaddr_storage *peerAddr;
+	double sampRTT;
+	double alpha = 0.125, beta = 0.25;
 
 	peerAddr = new sockaddr_storage;
 	peerLen = sizeof(struct sockaddr_storage);
@@ -133,8 +165,9 @@ void *recvClient(void *local) {
 						if (dupSeq == 3) {
 							dupSeq = 0;
 
-							RTT = myTCP->setTimeoutTimer(myTCP->to_timer, 50);
-							//printf("RTT=%u\n", RTT);
+							myTCP->startTimer(myTCP->to_timer, myTCP->timeout);
+							myTCP->validRTT = 0;
+
 							switch (myTCP->congState) {
 							case SLOWSTART:
 								myTCP->congState = FASTREC;
@@ -157,17 +190,32 @@ void *recvClient(void *local) {
 						if (myTCP->packetList->containsEnd(header->ack - 1)) {
 							dupSeq = 0;
 
-							RTT = myTCP->setTimeoutTimer(myTCP->to_timer, 50);
+							sampRTT = myTCP->timeout - myTCP->stopTimer(
+									myTCP->to_timer);
+
+							if (myTCP->validRTT) {
+								myTCP->estRTT = (1 - alpha) * myTCP->estRTT
+										+ alpha * sampRTT;
+								myTCP->devRTT = (1 - beta) * myTCP->devRTT
+										+ beta * abs(sampRTT - myTCP->estRTT);
+
+								myTCP->timeout = myTCP->estRTT + 4
+										* myTCP->devRTT;
+							}
+
+							myTCP->startTimer(myTCP->to_timer, myTCP->timeout);
+
 							//printf("RTT=%u\n", RTT);
 							switch (myTCP->congState) {
 							case SLOWSTART:
-								myTCP->congWindow *= 2;
+								myTCP->congWindow += myTCP->MSS;
 								if (myTCP->congWindow >= myTCP->threshhold) {
 									myTCP->congState = AIMD;
 								}
 								break;
 							case AIMD:
-								myTCP->congWindow += myTCP->MSS;
+								myTCP->congWindow += myTCP->MSS * myTCP->MSS
+										/ myTCP->congWindow;
 								break;
 							case FASTREC:
 								myTCP->congState = AIMD;
@@ -430,7 +478,7 @@ int TCP::connectTCP(char *addr, char *port) {
 		printf("Error creating time out timer. Exiting.\n");
 		exit(-1);
 	}
-	setTimeoutTimer(to_timer, 0);
+	stopTimer(to_timer);
 
 	//TODO: add in 3 way handshake & block until done
 
@@ -444,6 +492,10 @@ int TCP::connectTCP(char *addr, char *port) {
 	congWindow = MSS - TCP_HEADER_SIZE;
 	//printf("congState=%d congWindow=%d\n", congState, congWindow);
 	threshhold = MAX_RECV_BUFF / 2;
+	timeout = 50;
+	estRTT = timeout;
+	devRTT = 0;
+	validRTT = 0;
 
 	packetList = new OrderedList();
 	sem_init(&packet_sem, 0, 1);
@@ -541,7 +593,7 @@ int TCP::listenTCP(char *port) {
 		printf("Error creating time out timer. Exiting.\n");
 		exit(-1);
 	}
-	setTimeoutTimer(to_timer, 0);
+	stopTimer(to_timer);
 
 	//TODO: add in 3 way handshake & block until done
 
@@ -574,7 +626,6 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 	Node *node;
 	int cong;
 	int ret;
-	unsigned int RTT;
 	unsigned char offset;
 
 	//cout << "entered\n";
@@ -651,8 +702,11 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 
 				if (firstFlag) {
 					firstFlag = 0;
-					RTT = setTimeoutTimer(to_timer, 50);
-					//printf("RTT=%u\n", RTT);
+					timeout *= 2;
+					estRTT = timeout;
+					devRTT = 0;
+					startTimer(to_timer, timeout);
+					validRTT = 0;
 				}
 			} else {
 				gbnFlag = 0;
@@ -718,12 +772,12 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				send(sock, packet, packetLen, 0);
 				//printf("sending seqnum=%d seqend=%d\n", header->seqNum,
 				//		header->seqNum + dataLen - 1);
+				validRTT = 1;
 				sem_post(&packet_sem);
 
 				if (firstFlag) {
 					firstFlag = 0;
-					RTT = setTimeoutTimer(to_timer, 50);
-					//printf("RTT=%u\n", RTT);
+					startTimer(to_timer, timeout);
 				}
 				//cout << "finished packet send\n";
 			} else {
@@ -733,7 +787,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 
 		if (index >= bufLen && packetList->getSize() == 0) {
 			//printf("finished write bufLen=%d, returning\n", bufLen);
-			setTimeoutTimer(to_timer, 0);
+			stopTimer(to_timer);
 			return 0;
 		}
 
@@ -753,7 +807,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 	}
 }
 
-int TCP::read(char *buffer, unsigned int bufLen, int millis) {
+int TCP::read(char *buffer, unsigned int bufLen, double millis) {
 	int size = 0;
 	char *index = buffer;
 	char *pt;
@@ -761,11 +815,9 @@ int TCP::read(char *buffer, unsigned int bufLen, int millis) {
 	Node *head = NULL;
 	Node *tail;
 	int avail = 0;
-	unsigned int RTT;
 	timeoutFlag = 0;
 
-	RTT = setTimeoutTimer(to_timer, millis);
-	//printf("RTT=%u\n", RTT);
+	startTimer(to_timer, millis);
 
 	while (!timeoutFlag && size < bufLen) {
 		//printf("Waiting size=%d bufLen=%d\n", size, bufLen);
@@ -833,7 +885,7 @@ int TCP::read(char *buffer, unsigned int bufLen, int millis) {
 		}
 	}
 
-	setTimeoutTimer(to_timer, 0);
+	stopTimer(to_timer);
 
 	return size;
 }

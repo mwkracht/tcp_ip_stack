@@ -20,8 +20,9 @@
 #include <time.h>
 #include <signal.h>
 #include "OrderedList.h"
+#include <cmath>
 
-#define MTU 492
+#define MTU 500
 #define MAX_RECV_BUFF 10240
 #define TCP_HEADER_SIZE 20
 
@@ -48,15 +49,17 @@ class TCP{
 		int connectTCP(char *addr, char *port);
 		int listenTCP(char *port); //need to add three way handshake capability
 		int write(char *buffer, unsigned int bufLen);
-		int read(char *buffer, unsigned int bufLen, int millis=0);
+		int read(char *buffer, unsigned int bufLen, double millis=0);
 		//int closeTCP();
-		unsigned int setTimeoutTimer(timer_t timer, int millis);
+		double stopTimer(timer_t timer);
+		void startTimer(timer_t timer, double millis);
+		unsigned int setTimer(timer_t timer, int millis); //deprecated
 		int sock;
 		struct addrinfo *clientAddr;
 		struct addrinfo *serverAddr;
 		unsigned int window;
 		unsigned int recvWindow;
-		unsigned int congWindow;
+		double congWindow;
 		unsigned int congState;
 		unsigned int MSS;
 		unsigned int threshhold;
@@ -69,6 +72,10 @@ class TCP{
 		OrderedList *dataList;
 		OrderedList *packetList;
 		timer_t to_timer;
+		double timeout;
+		double estRTT;
+		double devRTT;
+		unsigned int validRTT;
 	private:
 		pthread_t recv;
 };
