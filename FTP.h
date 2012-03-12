@@ -17,10 +17,11 @@ class FTP{
 		~FTP();
 		int sendFile();
 		int recvFile();
+		int openPort();
 	private:
-		char *file_name, *host, *port;
-		UTrans *proto;
-		unsigned int file_length;
+		char *fileName, *host, *port;
+		TCP *tcp;
+		unsigned int fileLength;
 };
 
 #endif
