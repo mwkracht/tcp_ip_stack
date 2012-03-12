@@ -21,7 +21,7 @@
 #include <signal.h>
 #include "OrderedList.h"
 
-#define MTU 500
+#define MTU 492
 #define MAX_RECV_BUFF 10240
 #define TCP_HEADER_SIZE 20
 
