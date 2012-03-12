@@ -28,7 +28,7 @@ double TCP::stopTimer(timer_t timer) {
 void TCP::startTimer(timer_t timer, double millis) {
 	struct itimerspec its;
 	its.it_value.tv_sec = static_cast<long int> (millis / 1000);
-	its.it_value.tv_nsec = static_cast<long int> ((millis % 1000) * 1000000);
+	its.it_value.tv_nsec = static_cast<long int> (fmod(millis,1000) * 1000000);
 	its.it_interval.tv_sec = 0;
 	its.it_interval.tv_nsec = 0;
 
