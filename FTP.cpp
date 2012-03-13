@@ -112,7 +112,7 @@ int FTP::recvFile(){
 	while(index<fileLength){
 		retSize = tcp->read(output+index, fileLength-index, 0);
 		if(retSize == 0){
-			cerr << "ERROR: Received nothing from TCP\n";
+			printf("ERROR: Received nothing from TCP ind:%d\n",index);
 		}
 		index += retSize;
 	}

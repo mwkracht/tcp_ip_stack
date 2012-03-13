@@ -21,9 +21,10 @@
 #include <signal.h>
 #include "OrderedList.h"
 #include <cmath>
+#include <math.h>
 
 #define MTU 500
-#define MAX_RECV_BUFF 10240
+#define MAX_RECV_BUFF 65535
 #define TCP_HEADER_SIZE 20
 
 #define ACK_FLAG 0x0010
@@ -49,7 +50,7 @@ class TCP{
 		int connectTCP(char *addr, char *port);
 		int listenTCP(char *port); //need to add three way handshake capability
 		int write(char *buffer, unsigned int bufLen);
-		int read(char *buffer, unsigned int bufLen, double millis=0);
+		int read(char *buffer, unsigned int bufLen, double millis=0.0);
 		//int closeTCP();
 		double stopTimer(timer_t timer);
 		void startTimer(timer_t timer, double millis);
@@ -76,6 +77,7 @@ class TCP{
 		double estRTT;
 		double devRTT;
 		unsigned int validRTT;
+		int transDone;
 	private:
 		pthread_t recv;
 };
