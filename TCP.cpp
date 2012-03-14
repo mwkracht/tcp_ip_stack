@@ -730,8 +730,8 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 			node = packetList->peekHead();
 			if (node != NULL) {
 				send(sock, node->data, node->size, 0);
-				//printf("fast: sending seqnum=%d seqend=%d size=%d\n",
-				//		node->seqNum, node->seqEnd, node->size);
+				printf("fast: sending seqnum=%d seqend=%d size=%d\n",
+						node->seqNum, node->seqEnd, node->size);
 				TOTAL_fast++;
 			}
 			sem_post(&packet_sem);
@@ -766,8 +766,8 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				dataLen = node->size - offset;
 				window -= dataLen;
 
-				//printf("gbn: sending seqnum=%d seqend=%d size=%d dataLen=%d\n",
-				//		node->seqNum, node->seqEnd, node->size, dataLen);
+				printf("gbn: sending seqnum=%d seqend=%d size=%d dataLen=%d\n",
+						node->seqNum, node->seqEnd, node->size, dataLen);
 				TOTAL_gbn++;
 
 				if (firstFlag) {
