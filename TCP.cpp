@@ -854,7 +854,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 					exit(-1);
 				}
 				transDone = 0;
-				cout << "broke packet sem";
+				//cout << "broke packet sem";
 				int ret = packetList->insert(header->seqNum, header->seqNum
 						+ dataLen - 1, packet, packetLen);
 				if (ret) {

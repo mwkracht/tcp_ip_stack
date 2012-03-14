@@ -22,14 +22,15 @@
 #done
 make
 
-for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20
-do 
+#for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20
+#do 
 	echo "Run# $i"
+	ps -e | grep dl_server | awk '{print $1;}'| xargs kill -9
 	./dl_server 15165 > scratchServ.txt 2>&1 &
 	./dl_client localhost 15165 input4MBit.dat > scratchClie.txt 2>&1
 	sleep 1
 	#ps -aux | grep ./dl_
-done
+#done
 
 exit 0
 
