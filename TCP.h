@@ -26,6 +26,9 @@
 #define MTU 500
 #define MAX_RECV_BUFF 65535
 #define TCP_HEADER_SIZE 20
+#define MIN_TIMEOUT 1
+#define MAX_TIMEOUT 10000
+
 
 #define ACK_FLAG 0x0010
 #define RST_FLAG 0x0003
@@ -58,8 +61,8 @@ class TCP{
 		int sock;
 		struct addrinfo *clientAddr;
 		struct addrinfo *serverAddr;
-		unsigned int window;
-		unsigned int recvWindow;
+		unsigned short window;
+		unsigned short recvWindow;
 		double congWindow;
 		unsigned int congState;
 		unsigned int MSS;

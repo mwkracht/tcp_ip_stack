@@ -130,8 +130,8 @@ int FTP::recvFile(){
 	}
 
 	double throughput = (index * 8.0)/(elapsed * 1000.0);
-	printf("Total throughput for transmission was %f Kb/sec \n", throughput);
-	printf("Total bytes lost: %u\n", fileLength-index);
+	printf("Throughput:%f Kb/sec \n", throughput);
+	printf("Lost: %u\n", fileLength-index);
 	ofstream out_file("output.dat", ios::binary);
 	if(out_file.is_open()){
 		out_file.write(output,index);

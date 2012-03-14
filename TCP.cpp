@@ -16,6 +16,7 @@ unsigned int TOTAL_dropped = 0;
 unsigned int TOTAL_wait = 0;
 
 double TCP::stopTimer(timer_t timer) {
+	//printf("stopping timer\n");
 	struct itimerspec its;
 	struct itimerspec its_old;
 
@@ -34,6 +35,7 @@ double TCP::stopTimer(timer_t timer) {
 }
 
 void TCP::startTimer(timer_t timer, double millis) {
+	//printf("starting timer m=%f\n", millis);
 	struct itimerspec its;
 	its.it_value.tv_sec = static_cast<long int> (millis / 1000);
 	its.it_value.tv_nsec = static_cast<long int> (fmod(millis, 1000) * 1000000);
@@ -160,27 +162,28 @@ void *recvClient(void *local) {
 					exit(-1);
 				}
 
-				//printf("before recvWin=%d Win=%d\n", myTCP->recvWindow, myTCP->window);
+				//printf("before recvWin=%d Win=%d\n", myTCP->recvWindow,
+				//		myTCP->window);
 
-				myTCP->recvWindow = header->window;
 				myTCP->window = header->window;
 				myTCP->serverSeq = header->seqNum;
 
-				//printf("after recvWin=%d Win=%d\n", myTCP->recvWindow, myTCP->window);
+				//printf("after recvWin=%d Win=%d\n", myTCP->recvWindow,
+				//		myTCP->window);
 
-				printf("before cong state=%d win=%f\n", myTCP->congState,
-						myTCP->congWindow);
+				//printf("before cong: state=%d win=%f\n", myTCP->congState,
+				//		myTCP->congWindow);
 
 				head = myTCP->packetList->peekHead();
 				Node *tail = myTCP->packetList->peekTail();
 				if (head != NULL) {
-					if (tail) {
-						printf("Sendbase=%u end=%u ACK=%u\n", head->seqNum,
-								tail->seqEnd, header->ack);
-					} else {
-						printf("Sendbase=%u end=NULL ACK=%u\n", head->seqNum,
-								header->ack);
-					}
+//					if (tail) {
+//						printf("Sendbase=%u end=%u ACK=%u\n", head->seqNum,
+//								tail->seqEnd, header->ack);
+//					} else {
+//						printf("Sendbase=%u end=NULL ACK=%u\n", head->seqNum,
+//								header->ack);
+//					}
 					if (header->ack == head->seqNum) {
 						dupSeq++;
 						if (dupSeq == 3) {
@@ -192,6 +195,7 @@ void *recvClient(void *local) {
 							switch (myTCP->congState) {
 							case SLOWSTART:
 								myTCP->congState = FASTREC;
+								fastFlag = 1;
 								break;
 							case AIMD:
 								myTCP->congState = FASTREC;
@@ -200,8 +204,10 @@ void *recvClient(void *local) {
 								} else {
 									myTCP->congWindow = myTCP->MSS;
 								}
+								fastFlag = 1;
 								break;
 							case FASTREC:
+								fastFlag = 0;
 								break;
 							default:
 								fprintf(stderr, "unknown congState=%d\n",
@@ -209,8 +215,7 @@ void *recvClient(void *local) {
 							}
 							//printf("congState=%d congWindow=%d\n",
 							//		myTCP->congState, myTCP->congWindow);
-							fastFlag = 1;
-							printf("fast retransmit\n");
+							//printf("fast retransmit\n");
 						}
 					} else {
 						if (myTCP->packetList->containsEnd(header->ack - 1)) {
@@ -225,8 +230,13 @@ void *recvClient(void *local) {
 								myTCP->devRTT = (1 - beta) * myTCP->devRTT
 										+ beta * abs(sampRTT - myTCP->estRTT);
 
-								//myTCP->timeout = myTCP->estRTT + (1/beta)
-								//		* myTCP->devRTT;
+								myTCP->timeout = myTCP->estRTT + (1 / beta)
+										* myTCP->devRTT;
+								if (myTCP->timeout < MIN_TIMEOUT) {
+									myTCP->timeout = MIN_TIMEOUT;
+								} else if (myTCP->timeout > MAX_TIMEOUT) {
+									myTCP->timeout = MAX_TIMEOUT;
+								}
 							}
 
 							myTCP->startTimer(myTCP->to_timer, myTCP->timeout);
@@ -259,8 +269,8 @@ void *recvClient(void *local) {
 						} else {
 							printf("invalid ack\n");
 						}
-						printf("after cong state=%d win=%f\n",
-								myTCP->congState, myTCP->congWindow);
+						//printf("after cong: state=%d win=%f\n",
+						//		myTCP->congState, myTCP->congWindow);
 					}
 					//printf("Through processing ack\n");
 				}
@@ -318,7 +328,7 @@ void *recvServer(void *local) {
 		data = (char *) header + offset;
 		dataLen = size - offset;
 
-		printf("Received packet, seq=%d, size=%d\n", header->seqNum, size);
+		//printf("Received packet, seq=%d, size=%d\n", header->seqNum, size);
 
 		//check that ports match expected or reject packet
 		calc = checksum(buffer, size);
@@ -334,8 +344,8 @@ void *recvServer(void *local) {
 				exit(-1);
 			}
 			if (myTCP->clientSeq == header->seqNum) {
-				printf("In order seq=%d end=%d client=%d\n", header->seqNum,
-						header->seqNum + dataLen, myTCP->clientSeq + dataLen);
+				//printf("In order seq=%d end=%d client=%d\n", header->seqNum,
+				//		header->seqNum + dataLen, myTCP->clientSeq + dataLen);
 				//process flags
 
 				myTCP->dataList->insert(header->seqNum, header->seqNum
@@ -357,9 +367,9 @@ void *recvServer(void *local) {
 
 						offset = 4 * (header->flags >> 12);
 						data = (char *) header + offset;
-						dataLen = size - offset;
-						printf("Connected to seq=%d datalen:%d\n",
-								header->seqNum, dataLen);
+						dataLen = head->size - offset;
+						//printf("Connected to seq=%d datalen:%d\n",
+						//		header->seqNum, dataLen);
 
 						myTCP->dataList->insert(header->seqNum, header->seqNum
 								+ dataLen - 1, data, dataLen, head->del);
@@ -372,30 +382,43 @@ void *recvServer(void *local) {
 				sem_post(&wait_sem); //signal recv main thread
 				newBuf = true;
 			} else {
+				Node *dataHead = myTCP->dataList->peekHead();
+				Node *dataTail = myTCP->dataList->peekTail();
+				Node *tail = myTCP->packetList->peekTail();
+//				if (tail) {
+//					printf("clientSeq=%d seqend=%d buffered=%d\n",
+//							myTCP->clientSeq, tail->seqEnd, tail->seqEnd
+//									- myTCP->clientSeq);
+//				}
+
+				//printf("Test window:%u\n", myTCP->window);
 
 				//TODO: handle circular seq num
 				if (myTCP->clientSeq < header->seqNum && header->seqNum
 						+ dataLen <= myTCP->clientSeq + MAX_RECV_BUFF) {
-					printf("Buffering out of order exp=%d seq=%d\n",
-							myTCP->clientSeq, header->seqNum);
+					//printf("Buffering out of order exp=%d seq=%d sanity=%d\n",
+					//		myTCP->clientSeq, header->seqNum, dataLen);
 					int ret = myTCP->packetList->insert(header->seqNum,
 							header->seqNum + dataLen - 1, buffer, size);
 					if (ret) {
 						//is dubplicate / colliding
 						newBuf = false;
+						//printf("Dropping duplicate exp=%d seq=%d\n",
+						//		myTCP->clientSeq, header->seqNum);
+						TOTAL_dropped++;
 					} else {
 						myTCP->window -= dataLen;
 						newBuf = true;
 					}
 				} else {
-					printf("Dropping duplicate exp=%d seq=%d\n",
-							myTCP->clientSeq, header->seqNum);
+					//printf("Dropping out of window exp=%d seq=%d\n",
+					//		myTCP->clientSeq, header->seqNum);
 					TOTAL_dropped++;
 				}
 			}
 
 			//ACK
-			printf("Sending ACK seq=%d\n", myTCP->clientSeq);
+			//printf("Sending ACK seq=%d\n", myTCP->clientSeq);
 
 			header = (struct TCP_hdr *) buffer;
 
@@ -412,6 +435,7 @@ void *recvServer(void *local) {
 			ackHdr->window = myTCP->window;
 			ackHdr->urgent = 0;
 
+			//printf("Ack hdr window:%u\n", myTCP->window);
 			//unsigned char *options;
 			//data? if we have 2way msging
 
@@ -514,12 +538,13 @@ int TCP::connectTCP(char *addr, char *port) {
 
 	//TODO: add in 3 way handshake & block until done
 
+	//all these are agreed in setup
 	MSS = MTU - TCP_HEADER_SIZE;
 	clientSeq = 1; //rand gen
 	serverSeq = 1; //sent to us
-
 	recvWindow = MAX_RECV_BUFF;
 	window = recvWindow; //sent to us
+
 	congState = SLOWSTART;
 	congWindow = MSS;
 	//printf("congState=%d congWindow=%d\n", congState, congWindow);
@@ -660,15 +685,16 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 	int cong;
 	int ret;
 	unsigned char offset;
+	int onWire = 0;
 
 	//cout << "entered\n";
 	while (1) {
-		//printf("Win=%d recvWin=%d congWin=%d\n", window, recvWindow, congWindow);
+		//printf("Win=%u recvWin=%u congWin=%f\n", window, recvWindow, congWindow);
 		//printf("flags: first=%d gbn=%d, fast=%d, to=%d, wait=%d\n", firstFlag,
 		//		gbnFlag, fastFlag, timeoutFlag, waitFlag);
 
 		if (timeoutFlag) {
-			printf("timeout=%f\n", timeout);
+			//printf("timeout=%f\n", timeout);
 
 			while ((ret = sem_wait(&packet_sem)) == -1 && errno == EINTR)
 				;
@@ -691,7 +717,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 
 			//printf("congState=%d congWindow=%d\n", congState, congWindow);
 		} else if (fastFlag) {
-			cout << "fast retransmit\n";
+			//cout << "fast retransmit\n";
 
 			while ((ret = sem_wait(&packet_sem)) == -1 && errno == EINTR)
 				;
@@ -704,13 +730,13 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 			node = packetList->peekHead();
 			if (node != NULL) {
 				send(sock, node->data, node->size, 0);
-				printf("fast: sending seqnum=%d seqend=%d size=%d\n",
-						node->seqNum, node->seqEnd, node->size);
+				//printf("fast: sending seqnum=%d seqend=%d size=%d\n",
+				//		node->seqNum, node->seqEnd, node->size);
 				TOTAL_fast++;
 			}
 			sem_post(&packet_sem);
 		} else if (gbnFlag) {
-			cout << "WENT TO GO BACK NNNNN!!!!!!\n";
+			//cout << "WENT TO GO BACK NNNNN!!!!!!\n";
 			while ((ret = sem_wait(&packet_sem)) == -1 && errno == EINTR)
 				;
 			if (ret == -1 && errno != EINTR) {
@@ -718,11 +744,14 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				exit(-1);
 			}
 
+			//printf("packetlist.size=%d\n", packetList->getSize());
+
 			if (firstFlag) {
 				node = packetList->peekHead();
 			} else if (window <= 0 || congWindow - recvWindow + window <= 0) { //congestion window
 				node = NULL;
 				waitFlag = 1;
+				//printf("flagging waitFlag\n");
 			} else {
 				node = packetList->findNext(resendSeq);
 			}
@@ -737,30 +766,48 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				dataLen = node->size - offset;
 				window -= dataLen;
 
-				printf("gbn: sending seqnum=%d seqend=%d size=%d dataLen=%d\n",
-						node->seqNum, node->seqEnd, node->size, dataLen);
+				//printf("gbn: sending seqnum=%d seqend=%d size=%d dataLen=%d\n",
+				//		node->seqNum, node->seqEnd, node->size, dataLen);
 				TOTAL_gbn++;
 
 				if (firstFlag) {
 					firstFlag = 0;
 
 					timeout *= 2;
+					if (timeout > MAX_TIMEOUT) {
+						timeout = MAX_TIMEOUT;
+					}
 					estRTT = timeout;
 					devRTT = 0;
 					startTimer(to_timer, timeout);
 					validRTT = 0;
 				}
-			} else {
+			} else if (!waitFlag) {
 				firstFlag = 0;
 				gbnFlag = 0;
+				//printf("stopping gbn\n");
 			}
 			sem_post(&packet_sem);
 		} else {
-			printf("cong:%u wind:%u\n", static_cast<unsigned int> (congWindow),
-					window);
-			cong = congWindow - recvWindow + window;
-			if (index < bufLen && window > 0 && cong > 0) {
-				cout << "sending packet\n";
+			//printf("cong:%u wind:%u\n", static_cast<unsigned int> (congWindow),
+			//		window);
+			//cong = congWindow - recvWindow + window;
+			Node *head = packetList->peekHead();
+			if (head) {
+				onWire = clientSeq - head->seqNum;
+			} else {
+				onWire = 0;
+			}
+			cong = congWindow - onWire;
+
+//			if (head) {
+//				printf("send_base=%d onWire=%d cong=%d\n", head->seqNum,
+//						onWire, cong);
+//			} else {
+//				printf("send_base=%d onWire=0 cong=%d\n", clientSeq, cong);
+//			}
+			if (index < bufLen && window > 0 && cong > 0 && onWire < recvWindow) {
+				//cout << "sending packet\n";
 				packet = new char[MTU];
 				header = (struct TCP_hdr *) packet;
 
@@ -799,7 +846,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 
 				header->checksum = checksum(packet, packetLen);
 
-				cout << "hung up on packet sem\n";
+				//cout << "hung up on packet sem\n";
 				while ((ret = sem_wait(&packet_sem)) == -1 && errno == EINTR)
 					;
 				if (ret == -1 && errno != EINTR) {
@@ -813,13 +860,13 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				if (ret) {
 					//should never occur
 				}
-				cout << "actually inserted..\n";
+				//cout << "actually inserted..\n";
 				window -= dataLen;
 				send(sock, packet, packetLen, 0);
-				printf(
-						"cont: sending seqnum=%d seqend=%d size=%d dataLen=%d\n",
-						header->seqNum, header->seqNum + dataLen - 1, dataLen
-								+ 20, dataLen);
+//				printf(
+//						"cont: sending seqnum=%d seqend=%d size=%d dataLen=%d\n",
+//						header->seqNum, header->seqNum + dataLen - 1, dataLen
+//								+ 20, dataLen);
 
 				validRTT = 1;
 				sem_post(&packet_sem);
@@ -828,28 +875,22 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 					firstFlag = 0;
 					startTimer(to_timer, timeout);
 				}
-				cout << "finished packet send\n";
+				//cout << "finished packet send\n";
 			} else {
 				waitFlag = 1;
 			}
 		}
 
 		if (index >= bufLen && packetList->getSize() == 0) {
-			printf("finished write bufLen=%d, returning\n", bufLen);
-			printf("totals: to=%d fast=%d wait=%d\n", TOTAL_timeouts,
-					TOTAL_fast, TOTAL_wait);
+//			printf("finished write bufLen=%d, returning\n", bufLen);
+//			printf("totals: to=%d fast=%d wait=%d\n", TOTAL_timeouts,
+//					TOTAL_fast, TOTAL_wait);
 			stopTimer(to_timer);
 			return 0;
-		} else {
-			printf("Size:%d ind:%d buf:%d\n", packetList->getSize(), index,
-					bufLen);
-			if (packetList->getSize() != 0) {
-				printf("SeqNum[0]:%u\n", packetList->peekHead()->seqNum);
-			}
 		}
 
 		if (waitFlag && !timeoutFlag && !fastFlag) {
-			cout << "Waiting...\n";
+			//cout << "Waiting...\n";
 			TOTAL_wait++;
 
 			while ((ret = sem_wait(&wait_sem)) == -1 && errno == EINTR)
@@ -861,7 +902,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 			waitFlag = 0;
 			sem_init(&wait_sem, 0, 0);
 
-			printf("left waiting waitFlag=%d\n", waitFlag);
+			//printf("left waiting waitFlag=%d\n", waitFlag);
 		}
 	}
 }
@@ -945,7 +986,7 @@ int TCP::read(char *buffer, unsigned int bufLen, double millis) {
 		}
 	}
 
-	printf("totals: dropped=%d\n", TOTAL_dropped);
+	//printf("totals: dropped=%d\n", TOTAL_dropped);
 
 	stopTimer(to_timer);
 
