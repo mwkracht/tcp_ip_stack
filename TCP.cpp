@@ -690,8 +690,8 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 	//cout << "entered\n";
 	while (1) {
 		//printf("Win=%u recvWin=%u congWin=%f\n", window, recvWindow, congWindow);
-		//printf("flags: first=%d gbn=%d, fast=%d, to=%d, wait=%d\n", firstFlag,
-		//		gbnFlag, fastFlag, timeoutFlag, waitFlag);
+		printf("flags: first=%d gbn=%d, fast=%d, to=%d, wait=%d\n", firstFlag,
+				gbnFlag, fastFlag, timeoutFlag, waitFlag);
 
 		if (timeoutFlag) {
 			//printf("timeout=%f\n", timeout);
@@ -854,7 +854,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 					exit(-1);
 				}
 				transDone = 0;
-				cout << "broke packet sem";
+				//cout << "broke packet sem\n";
 				int ret = packetList->insert(header->seqNum, header->seqNum
 						+ dataLen - 1, packet, packetLen);
 				if (ret) {
@@ -863,10 +863,10 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				//cout << "actually inserted..\n";
 				window -= dataLen;
 				send(sock, packet, packetLen, 0);
-//				printf(
-//						"cont: sending seqnum=%d seqend=%d size=%d dataLen=%d\n",
-//						header->seqNum, header->seqNum + dataLen - 1, dataLen
-//								+ 20, dataLen);
+				printf(
+						"cont: sending seqnum=%d seqend=%d size=%d dataLen=%d\n",
+						header->seqNum, header->seqNum + dataLen - 1, dataLen
+								+ 20, dataLen);
 
 				validRTT = 1;
 				sem_post(&packet_sem);
@@ -986,7 +986,7 @@ int TCP::read(char *buffer, unsigned int bufLen, double millis) {
 		}
 	}
 
-	//printf("totals: dropped=%d\n", TOTAL_dropped);
+	printf("totals: dropped=%d\n", TOTAL_dropped);
 
 	stopTimer(to_timer);
 
