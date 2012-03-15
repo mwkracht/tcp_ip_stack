@@ -7,7 +7,7 @@ echo "Test Window $1 vs. Throughput
 echo "Test Window $1 vs. Throughput
 " >> resultsWind.dat
 
-for j in 1 2
+for j in 1 2 3
 do 
 	ps -e | grep dl_server
 	./dl_server 15165 >> resultsWind.dat 2>&1 &
