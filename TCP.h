@@ -40,7 +40,7 @@
 #endif
 
 #define MTU 500
-#define MAX_RECV_BUFF 65535
+#define MAX_RECV_BUFF 480*1
 #define TCP_HEADER_SIZE 20
 #define MIN_TIMEOUT 1
 #define MAX_TIMEOUT 10000
