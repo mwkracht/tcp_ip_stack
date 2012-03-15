@@ -31,19 +31,19 @@
 #include <math.h>
 #include <sys/time.h>
 
-//#define DEBUG
-//#define ERROR
+#define DEBUG
+#define ERROR
 
 #ifdef DEBUG
 #define PRINT_DEBUG(format, args...) printf("DEBUG(%s, %d):"format, __FILE__, __LINE__, ##args);
 #else
-#define PRINT_DEBUG
+#define PRINT_DEBUG(format, args...)
 #endif
 
 #ifdef ERROR
 #define PRINT_ERROR(format, args...) printf("ERROR(%s, %d):"format, __FILE__, __LINE__, ##args);
 #else
-#define PRINT_ERROR
+#define PRINT_ERROR(format, args...)
 #endif
 
 #define MTU 500
@@ -105,6 +105,7 @@ class TCP{
 		unsigned int validRTT;
 		unsigned int seqEndRTT;
 		struct timeval stampRTT;
+		unsigned int firstRTT;
 	private:
 		pthread_t recv;
 };

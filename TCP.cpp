@@ -194,11 +194,17 @@ void *recvClient(void *local) {
 					}
 					if (header->ack == head->seqNum) {
 						dupSeq++;
+						if (gbnFlag){
+							firstFlag = 1;
+						}
+
 						if (dupSeq == 3) {
 							dupSeq = 0;
 
 							myTCP->startTimer(myTCP->to_timer, myTCP->timeout);
-							myTCP->validRTT = 0;
+							//myTCP->validRTT = 0;
+							PRINT_DEBUG("dropping seqEndRTT=%d\n", myTCP->seqEndRTT);
+							myTCP->seqEndRTT = 0;
 
 							switch (myTCP->congState) {
 							case SLOWSTART:
@@ -238,18 +244,26 @@ void *recvClient(void *local) {
 							//sampRTT = myTCP->timeout - myTCP->stopTimer(
 							//		myTCP->to_timer);
 
+							if (gbnFlag){
+								firstFlag = 1;
+							}
 
-							if (myTCP->validRTT && myTCP->seqEndRTT
+							if (/*myTCP->validRTT &&*/myTCP->seqEndRTT
 									== header->ack) {
 
 								gettimeofday(&current, 0);
+
+								PRINT_DEBUG("getting seqEndRTT=%d stampRTT=(%d, %d)\n", myTCP->seqEndRTT, myTCP->stampRTT.tv_sec, myTCP->stampRTT.tv_usec);
+								PRINT_DEBUG("getting seqEndRTT=%d current=(%d, %d)\n", myTCP->seqEndRTT, current.tv_sec, current.tv_usec);
+
+								PRINT_DEBUG("old sampleRTT=%f estRTT=%f devRTT=%f timout=%f\n", sampRTT, myTCP->estRTT, myTCP->devRTT, myTCP->timeout);
+
 								myTCP->seqEndRTT = 0;
 
-								double elapsed = 0.0;
 								if (myTCP->stampRTT.tv_usec > current.tv_usec) {
 									double decimal = (1000000.0
-											- (myTCP->stampRTT.tv_usec
-													- current.tv_usec))
+											+ current.tv_usec
+											- myTCP->stampRTT.tv_usec)
 											/ 1000000.0;
 									sampRTT = current.tv_sec
 											- myTCP->stampRTT.tv_sec - 1.0;
@@ -262,19 +276,29 @@ void *recvClient(void *local) {
 											- myTCP->stampRTT.tv_sec;
 									sampRTT += decimal;
 								}
+								sampRTT *= 1000.0;
+
+								if (myTCP->firstRTT) {
+									myTCP->estRTT = sampRTT;
+									myTCP->devRTT = sampRTT / 2;
+									myTCP->firstRTT = 0;
+								}
 
 								myTCP->estRTT = (1 - alpha) * myTCP->estRTT
 										+ alpha * sampRTT;
 								myTCP->devRTT = (1 - beta) * myTCP->devRTT
-										+ beta * abs(sampRTT - myTCP->estRTT);
+										+ beta * fabs(sampRTT - myTCP->estRTT);
 
-								myTCP->timeout = myTCP->estRTT + (1 / beta)
-										* myTCP->devRTT;
+								myTCP->timeout = myTCP->estRTT + myTCP->devRTT
+										/ beta;
 								if (myTCP->timeout < MIN_TIMEOUT) {
 									myTCP->timeout = MIN_TIMEOUT;
 								} else if (myTCP->timeout > MAX_TIMEOUT) {
 									myTCP->timeout = MAX_TIMEOUT;
 								}
+
+								PRINT_DEBUG("new sampleRTT=%f estRTT=%f devRTT=%f timout=%f\n", sampRTT, myTCP->estRTT, myTCP->devRTT, myTCP->timeout);
+								//PRINT_DEBUG("sampleRTT=%f timout=%f\n", sampRTT, myTCP->timeout);
 							}
 
 							myTCP->startTimer(myTCP->to_timer, myTCP->timeout);
@@ -594,7 +618,7 @@ int TCP::connectTCP(char *addr, char *port) {
 	timeout = 50;
 	estRTT = timeout;
 	devRTT = 0;
-	validRTT = 0;
+	firstRTT = 1;
 	seqEndRTT = 0;
 
 	packetList = new OrderedList();
@@ -746,6 +770,10 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				exit(-1);
 			}
 			timeoutFlag = 0;
+			timeout *= 2;
+			if (timeout > MAX_TIMEOUT) {
+				timeout = MAX_TIMEOUT;
+			}
 
 			firstFlag = 1;
 			gbnFlag = 1;
@@ -854,14 +882,9 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				if (firstFlag) {
 					firstFlag = 0;
 
-					timeout *= 2;
-					if (timeout > MAX_TIMEOUT) {
-						timeout = MAX_TIMEOUT;
-					}
-					estRTT = timeout;
-					devRTT = 0;
 					startTimer(to_timer, timeout);
-					validRTT = 0;
+					PRINT_DEBUG("dropping seqEndRTT=%d\n", seqEndRTT);
+					seqEndRTT = 0;
 				}
 			} else if (!waitFlag) {
 				firstFlag = 0;
@@ -950,17 +973,19 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 						+ 20, dataLen);
 
 				if (seqEndRTT == 0) {
-					validRTT = 1;
+					//validRTT = 1;
 					gettimeofday(&stampRTT, 0);
 					seqEndRTT = clientSeq;
+					PRINT_DEBUG("setting seqEndRTT=%d stampRTT=(%d, %d)\n", seqEndRTT, stampRTT.tv_sec, stampRTT.tv_usec);
 				}
-
-				sem_post(&packet_sem);
 
 				if (firstFlag) {
 					firstFlag = 0;
 					startTimer(to_timer, timeout);
 				}
+
+				sem_post(&packet_sem);
+
 				PRINT_DEBUG("finished packet send\n");
 			} else {
 				waitFlag = 1;
