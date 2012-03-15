@@ -37,18 +37,17 @@
 #ifdef DEBUG
 #define PRINT_DEBUG(format, args...) printf("DEBUG(%s, %d):"format, __FILE__, __LINE__, ##args);
 #else
-#define PRINT_DEBUG
+#define PRINT_DEBUG(format, args...)
 #endif
 
 #ifdef ERROR
 #define PRINT_ERROR(format, args...) printf("ERROR(%s, %d):"format, __FILE__, __LINE__, ##args);
 #else
-#define PRINT_ERROR
+#define PRINT_ERROR(format, args...)
 #endif
 
 #define MTU 500
-#define MAX_RECV_BUFF 480*1
-//#define MAX_RECV_BUFF 65535
+#define MAX_RECV_BUFF 65535
 #define TCP_HEADER_SIZE 20
 #define MIN_TIMEOUT 1
 #define MAX_TIMEOUT 10000
