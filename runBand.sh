@@ -15,7 +15,7 @@ echo "Test Bandwidth vs. Throughput
 
 for i in 100000 200000 300000 400000 500000 600000 700000 800000 900000 1000000
 do 
-for j in 1 2 3
+for j in 1
 do 
 	echo "Run# $j Bandwidth: $i bps" >> resultsBand.dat
 	echo "Run# $j Bandwidth $i bps"

@@ -193,9 +193,9 @@ void *recvClient(void *local) {
 								myTCP->clientSeq, header->ack);
 					}
 					if (header->ack == head->seqNum) {
-						if (FULL_FLAG)
+						if (FR_FLAG)
 							dupSeq++;
-						if (gbnFlag){
+						if (gbnFlag) {
 							firstFlag = 1;
 						}
 
@@ -235,8 +235,7 @@ void *recvClient(void *local) {
 								PRINT_ERROR("unknown congState=%d\n",
 										myTCP->congState)
 								;
-							}
-							PRINT_DEBUG("fast retransmit\n");
+							} PRINT_DEBUG("fast retransmit\n");
 						}
 					} else {
 						if (myTCP->packetList->containsEnd(header->ack - 1)) {
@@ -245,17 +244,15 @@ void *recvClient(void *local) {
 							//sampRTT = myTCP->timeout - myTCP->stopTimer(
 							//		myTCP->to_timer);
 
-							if (gbnFlag){
+							if (gbnFlag) {
 								firstFlag = 1;
 							}
 
-							if (FULL_FLAG && myTCP->seqEndRTT
-									== header->ack) {
+							if (RTT_FLAG && myTCP->seqEndRTT == header->ack) {
 
 								gettimeofday(&current, 0);
 
-								PRINT_DEBUG("getting seqEndRTT=%d stampRTT=(%d, %d)\n", myTCP->seqEndRTT, myTCP->stampRTT.tv_sec, myTCP->stampRTT.tv_usec);
-								PRINT_DEBUG("getting seqEndRTT=%d current=(%d, %d)\n", myTCP->seqEndRTT, current.tv_sec, current.tv_usec);
+								PRINT_DEBUG("getting seqEndRTT=%d stampRTT=(%d, %d)\n", myTCP->seqEndRTT, myTCP->stampRTT.tv_sec, myTCP->stampRTT.tv_usec); PRINT_DEBUG("getting seqEndRTT=%d current=(%d, %d)\n", myTCP->seqEndRTT, current.tv_sec, current.tv_usec);
 
 								PRINT_DEBUG("old sampleRTT=%f estRTT=%f devRTT=%f timout=%f\n", sampRTT, myTCP->estRTT, myTCP->devRTT, myTCP->timeout);
 
@@ -323,8 +320,7 @@ void *recvClient(void *local) {
 								PRINT_ERROR("unknown congState=%d\n",
 										myTCP->congState)
 								;
-							}
-							PRINT_DEBUG("congState=%d congWindow=%f\n",
+							} PRINT_DEBUG("congState=%d congWindow=%f\n",
 									myTCP->congState, myTCP->congWindow);
 
 							while (head != NULL && header->ack > head->seqEnd) {
@@ -337,8 +333,7 @@ void *recvClient(void *local) {
 					}
 					//PRINT_DEBUG("Through processing ack\n");
 
-				}
-				PRINT_DEBUG("after cong: state=%d win=%f\n", myTCP->congState,
+				} PRINT_DEBUG("after cong: state=%d win=%f\n", myTCP->congState,
 						myTCP->congWindow);
 
 				sem_post(&myTCP->packet_sem);
@@ -461,8 +456,9 @@ void *recvServer(void *local) {
 				//PRINT_DEBUG("Test window:%u\n", myTCP->window);
 
 				//TODO: handle circular seq num
-				if (FULL_FLAG && myTCP->clientSeq < header->seqNum && header->seqNum
-						+ dataLen <= myTCP->clientSeq + MAX_RECV_BUFF) {
+				if (BUF_FLAG && myTCP->clientSeq < header->seqNum
+						&& header->seqNum + dataLen <= myTCP->clientSeq
+								+ MAX_RECV_BUFF) {
 					PRINT_DEBUG("Buffering out of order exp=%d seq=%d sanity=%d\n",
 							myTCP->clientSeq, header->seqNum, dataLen);
 					int ret = myTCP->packetList->insert(header->seqNum,
@@ -757,8 +753,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 
 	//PRINT_DEBUG("entered\n");
 	while (1) {
-		PRINT_DEBUG("Win=%u recvWin=%u congWin=%f\n", window, recvWindow, congWindow);
-		PRINT_DEBUG("flags: first=%d gbn=%d, fast=%d, to=%d, wait=%d\n", firstFlag,
+		PRINT_DEBUG("Win=%u recvWin=%u congWin=%f\n", window, recvWindow, congWindow); PRINT_DEBUG("flags: first=%d gbn=%d, fast=%d, to=%d, wait=%d\n", firstFlag,
 				gbnFlag, fastFlag, timeoutFlag, waitFlag);
 
 		if (timeoutFlag) {
@@ -771,7 +766,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				exit(-1);
 			}
 			timeoutFlag = 0;
-			if (FULL_FLAG)
+			if (RTT_FLAG)
 				timeout *= 2;
 			if (timeout > MAX_TIMEOUT) {
 				timeout = MAX_TIMEOUT;
@@ -859,7 +854,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 
 			if (firstFlag) {
 				node = head;
-			} else if ((window <= 0 || cong <= 0) && FULL_FLAG) { //congestion window
+			} else if ((window <= 0 || cong <= 0) && CW_FLAG) { //congestion window
 				node = NULL;
 				waitFlag = 1;
 				PRINT_DEBUG("flagging waitFlag\n");
@@ -911,8 +906,8 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 			} else {
 				PRINT_DEBUG("send_base=%d onWire=0 cong=%d\n", clientSeq, cong);
 			}
-			if (index < bufLen && (window > 0 && cong > 0 && cong >= MSS || !FULL_FLAG)
-					&& onWire < recvWindow) {
+			if (index < bufLen && (window > 0 && cong > 0 && cong >= MSS
+					|| !CW_FLAG) && onWire < recvWindow) {
 				PRINT_DEBUG("sending packet\n");
 				packet = new char[MTU];
 				header = (struct TCP_hdr *) packet;
@@ -935,11 +930,11 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				} else {
 					dataLen = bufLen - index;
 				}
-				if (dataLen > window && FULL_FLAG) { //leave for now, move to outside if for Nagle
+				if (dataLen > window && CW_FLAG) { //leave for now, move to outside if for Nagle
 
 					dataLen = window;
 				}
-				if (dataLen > cong && FULL_FLAG) {
+				if (dataLen > cong && CW_FLAG) {
 					dataLen = cong;
 				}
 				//				PRINT_DEBUG("dataLen:%u\n",dataLen);
@@ -959,8 +954,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				if (ret == -1 && errno != EINTR) {
 					PRINT_ERROR("sem_wait prod");
 					exit(-1);
-				}
-				PRINT_DEBUG("broke packet sem\n");
+				} PRINT_DEBUG("broke packet sem\n");
 				int ret = packetList->insert(header->seqNum, header->seqNum
 						+ dataLen - 1, packet, packetLen);
 				if (ret) {
@@ -991,14 +985,12 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				PRINT_DEBUG("finished packet send\n");
 			} else {
 				waitFlag = 1;
-				PRINT_DEBUG("flagging waitFlag\n");
-				PRINT_DEBUG("cases: index=%d window=%d cong=%d MSS=%d recvWin=%d\n", index < bufLen, window > 0, cong > 0, cong >= MSS, onWire < recvWindow);
+				PRINT_DEBUG("flagging waitFlag\n"); PRINT_DEBUG("cases: index=%d window=%d cong=%d MSS=%d recvWin=%d\n", index < bufLen, window > 0, cong > 0, cong >= MSS, onWire < recvWindow);
 			}
 		}
 
 		if (index >= bufLen && packetList->getSize() == 0) {
-			PRINT_DEBUG("finished write bufLen=%d, returning\n", bufLen);
-			PRINT_DEBUG("totals: to=%d fast=%d wait=%d\n", TOTAL_timeouts,
+			PRINT_DEBUG("finished write bufLen=%d, returning\n", bufLen); PRINT_DEBUG("totals: to=%d fast=%d wait=%d\n", TOTAL_timeouts,
 					TOTAL_fast, TOTAL_wait);
 			waitFlag = 0;
 			stopTimer(to_timer);
@@ -1086,7 +1078,6 @@ int TCP::read(char *buffer, unsigned int bufLen, double millis) {
 
 				index += avail;
 				size += avail;
-				if (FULL_FLAG)
 				window += avail;
 				PRINT_DEBUG("window=%d\n", window);
 			} else {

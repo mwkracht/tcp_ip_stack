@@ -31,9 +31,12 @@
 #include <math.h>
 #include <sys/time.h>
 
-#define DEBUG
-#define ERROR
-#define FULL_FLAG 0
+//#define DEBUG
+//#define ERROR
+#define FR_FLAG 0
+#define BUF_FLAG 0
+#define CW_FLAG 0
+#define RTT_FLAG 0
 
 #ifdef DEBUG
 #define PRINT_DEBUG(format, args...) printf("DEBUG(%s, %d):"format, __FILE__, __LINE__, ##args);
