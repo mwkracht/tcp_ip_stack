@@ -22,6 +22,22 @@
 #include "OrderedList.h"
 #include <cmath>
 #include <math.h>
+#include <sys/time.h>
+
+//#define DEBUG
+//#define ERROR
+
+#ifdef DEBUG
+#define PRINT_DEBUG(format, args...) printf("DEBUG(%s, %d):"format, __FILE__, __LINE__, ##args);
+#else
+#define PRINT_DEBUG
+#endif
+
+#ifdef ERROR
+#define PRINT_ERROR(format, args...) printf("ERROR(%s, %d):"format, __FILE__, __LINE__, ##args);
+#else
+#define PRINT_ERROR
+#endif
 
 #define MTU 500
 #define MAX_RECV_BUFF 65535
@@ -80,7 +96,8 @@ class TCP{
 		double estRTT;
 		double devRTT;
 		unsigned int validRTT;
-		int transDone;
+		unsigned int seqEndRTT;
+		struct timeval stampRTT;
 	private:
 		pthread_t recv;
 };
