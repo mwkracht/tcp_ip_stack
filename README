@@ -2,3 +2,36 @@ Jonathan Reed
 Matthew Kracht 
 ECE - 5565 
 Project 2 Code base
+
+Introduction:
+This is our code base for Project 2. The main files are:
+dl_client.cpp
+dl_server.cpp
+FTP.cpp
+FTP.h
+TCP.cpp
+TCP.h
+OrderedList.cpp
+OrderedList.h
+Makefile
+UTrans.cpp
+UTrans.h
+
+If major problems arise, debugging statements can be enabled by uncommenting the definition of DEBUG and ERROR in TCP.h (lines 34 & 35). Lines 36-39 can also be used to test the different features on top of GBN that were added to create the TCP Reno implementation.
+
+FR_FLAG - fast retransmit
+BUF_FLAG - out of order buffering
+CW_FLAG - congestion window & window estimation
+RTT_FLAG - RTT estimation
+
+
+Compiling:
+To make our project simply use the provided make file and the commands 'make', 'make clean all'. This file builds both dl_client and dl_server.
+
+
+Running
+Each of the executables (dl_client and dl_server) should be run with the command arguments given in the project, i.e:
+dl_client <hostname> <port> <filename>
+dl_server <port>
+
+
