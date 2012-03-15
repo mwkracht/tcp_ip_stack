@@ -74,6 +74,7 @@ int FTP::sendFile() {
 		file_buffer = new char[MAX_FILE_SEG];
 
 		for (int i = fileLength; i > 0; i -= MAX_FILE_SEG) {
+			printf("writing i=%d\n", i);
 			if (i > MAX_FILE_SEG) {
 				file.read(file_buffer, MAX_FILE_SEG);
 
@@ -92,6 +93,8 @@ int FTP::sendFile() {
 				}
 			}
 		}
+
+		tcp->closeTCP();
 
 		file.close();
 
@@ -139,6 +142,7 @@ int FTP::recvFile() {
 		}
 		index += retSize;
 	}
+	//tcp->closeTCP();
 	gettimeofday(&after, 0);
 
 	double elapsed = 0.0;
