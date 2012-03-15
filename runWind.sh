@@ -16,5 +16,8 @@ do
 	ps -e | grep router | awk '{print $1;}'| xargs kill -9
 done
 
+echo "
+" >> resultsWind.dat
+
 exit 0
 

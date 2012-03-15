@@ -33,6 +33,7 @@
 
 #define DEBUG
 #define ERROR
+#define FULL_FLAG 0
 
 #ifdef DEBUG
 #define PRINT_DEBUG(format, args...) printf("DEBUG(%s, %d):"format, __FILE__, __LINE__, ##args);

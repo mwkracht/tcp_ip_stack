@@ -193,7 +193,8 @@ void *recvClient(void *local) {
 								myTCP->clientSeq, header->ack);
 					}
 					if (header->ack == head->seqNum) {
-						dupSeq++;
+						if (FULL_FLAG)
+							dupSeq++;
 						if (gbnFlag){
 							firstFlag = 1;
 						}
@@ -248,7 +249,7 @@ void *recvClient(void *local) {
 								firstFlag = 1;
 							}
 
-							if (/*myTCP->validRTT &&*/myTCP->seqEndRTT
+							if (FULL_FLAG && myTCP->seqEndRTT
 									== header->ack) {
 
 								gettimeofday(&current, 0);
@@ -460,7 +461,7 @@ void *recvServer(void *local) {
 				//PRINT_DEBUG("Test window:%u\n", myTCP->window);
 
 				//TODO: handle circular seq num
-				if (myTCP->clientSeq < header->seqNum && header->seqNum
+				if (FULL_FLAG && myTCP->clientSeq < header->seqNum && header->seqNum
 						+ dataLen <= myTCP->clientSeq + MAX_RECV_BUFF) {
 					PRINT_DEBUG("Buffering out of order exp=%d seq=%d sanity=%d\n",
 							myTCP->clientSeq, header->seqNum, dataLen);
@@ -770,7 +771,8 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				exit(-1);
 			}
 			timeoutFlag = 0;
-			timeout *= 2;
+			if (FULL_FLAG)
+				timeout *= 2;
 			if (timeout > MAX_TIMEOUT) {
 				timeout = MAX_TIMEOUT;
 			}
@@ -857,7 +859,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 
 			if (firstFlag) {
 				node = head;
-			} else if (window <= 0 || cong <= 0) { //congestion window
+			} else if ((window <= 0 || cong <= 0) && FULL_FLAG) { //congestion window
 				node = NULL;
 				waitFlag = 1;
 				PRINT_DEBUG("flagging waitFlag\n");
@@ -909,7 +911,7 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 			} else {
 				PRINT_DEBUG("send_base=%d onWire=0 cong=%d\n", clientSeq, cong);
 			}
-			if (index < bufLen && window > 0 && cong > 0 && cong >= MSS
+			if (index < bufLen && (window > 0 && cong > 0 && cong >= MSS || !FULL_FLAG)
 					&& onWire < recvWindow) {
 				PRINT_DEBUG("sending packet\n");
 				packet = new char[MTU];
@@ -933,11 +935,11 @@ int TCP::write(char *buffer, unsigned int bufLen) {
 				} else {
 					dataLen = bufLen - index;
 				}
-				if (dataLen > window) { //leave for now, move to outside if for Nagle
+				if (dataLen > window && FULL_FLAG) { //leave for now, move to outside if for Nagle
 
 					dataLen = window;
 				}
-				if (dataLen > cong) {
+				if (dataLen > cong && FULL_FLAG) {
 					dataLen = cong;
 				}
 				//				PRINT_DEBUG("dataLen:%u\n",dataLen);
@@ -1084,6 +1086,7 @@ int TCP::read(char *buffer, unsigned int bufLen, double millis) {
 
 				index += avail;
 				size += avail;
+				if (FULL_FLAG)
 				window += avail;
 				PRINT_DEBUG("window=%d\n", window);
 			} else {
