@@ -1,3 +1,10 @@
+/*
+ * Jonathan Reed - 9051-66446
+ * Matthew Kracht - 9053_25165
+ * ECE - 5565
+ * Project 2
+ */
+
 #ifndef _TCP_H
 #define _TCP_H
 
@@ -40,7 +47,7 @@
 #endif
 
 #define MTU 500
-#define MAX_RECV_BUFF 480*1
+#define MAX_RECV_BUFF 65535
 #define TCP_HEADER_SIZE 20
 #define MIN_TIMEOUT 1
 #define MAX_TIMEOUT 10000

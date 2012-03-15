@@ -1,3 +1,10 @@
+/*
+ * Jonathan Reed - 9051-66446
+ * Matthew Kracht - 9053_25165
+ * ECE - 5565
+ * Project 2
+ */
+
 #ifndef _UTRANS_H
 #define _UTRANS_H
 
