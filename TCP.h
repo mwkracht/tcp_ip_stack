@@ -94,7 +94,7 @@ public:
 	unsigned short recvWindow;
 	unsigned int congState;
 	double congWindow;
-	unsigned int threshhold;
+	double threshhold;
 
 	sem_t send_sem;
 	char sendBuffer[MAX_SEND_BUFF];
