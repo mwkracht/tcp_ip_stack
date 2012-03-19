@@ -49,7 +49,6 @@ int OrderedList::insert(unsigned int seqnum, unsigned int seqend, char *buf, int
 			delete newNode;
 			return -1;
 		}
-		tail = head;
 		newNode->next = head;
 		head = newNode;
 		size++;
